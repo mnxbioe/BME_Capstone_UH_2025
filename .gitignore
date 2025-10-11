@@ -61,3 +61,9 @@ Desktop.ini
 .jupyter/
 
 Thumbs.db
+
+# --- Jupyter notebooks (ignore all except 00_setup.ipynb) ---
+*.ipynb
+!notebooks/00_setup.ipynb
+.ipynb_checkpoints/
+
