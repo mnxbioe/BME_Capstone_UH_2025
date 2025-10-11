@@ -16,20 +16,20 @@ __pycache__/
 *.log
 *.tmp
 
-# --- Notebooks auto-saves ---
+# --- Jupyter notebooks ---
+*.ipynb
 .ipynb_checkpoints/
 
 # --- Virtual environments ---
 venv/
 env/
+.venv/
 .bme-capstone-env/
 *.env
 
 # --- IDE / editor files ---
 .vscode/
 .idea/
-.DS_Store
-Thumbs.db
 
 # --- Results and artifacts ---
 *.pt
@@ -42,10 +42,11 @@ Thumbs.db
 *.pkl
 *.ckpt
 *.onnx
-*.log
 *.pdf
 
 # --- OS metadata ---
+.DS_Store
+Thumbs.db
 ehthumbs.db
 Icon?
 Desktop.ini
@@ -58,3 +59,5 @@ Desktop.ini
 
 # --- JupyterLab workspace metadata ---
 .jupyter/
+
+Thumbs.db
