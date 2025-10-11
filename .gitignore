@@ -1,0 +1,60 @@
+# ===============================
+#  BME Capstone Git Ignore Rules
+# ===============================
+
+# --- Data directories ---
+data/
+*/data/
+!data/.gitkeep
+
+# --- Temporary / generated files ---
+__pycache__/
+*.py[cod]
+*.pyo
+*.so
+*.dll
+*.log
+*.tmp
+
+# --- Notebooks auto-saves ---
+.ipynb_checkpoints/
+
+# --- Virtual environments ---
+venv/
+env/
+.bme-capstone-env/
+*.env
+
+# --- IDE / editor files ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# --- Results and artifacts ---
+*.pt
+*.pth
+*.h5
+*.npz
+*.npy
+*.csv
+*.mat
+*.pkl
+*.ckpt
+*.onnx
+*.log
+*.pdf
+
+# --- OS metadata ---
+ehthumbs.db
+Icon?
+Desktop.ini
+
+# --- COMSOL / FEM / simulation caches ---
+*.mph
+*.dat
+*.bak
+*.out
+
+# --- JupyterLab workspace metadata ---
+.jupyter/
