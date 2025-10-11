@@ -1,0 +1,25 @@
+# --- Core scientific stack ---
+numpy
+scipy
+pandas
+matplotlib
+tqdm
+
+# --- Machine Learning / Deep Learning ---
+torch
+torchvision
+torchaudio
+
+# --- Neural PDE / PINN framework ---
+git+https://github.com/mathLab/PINA.git
+
+# --- Data handling and signals ---
+h5py
+scikit-learn
+mne
+pyyaml
+
+# --- Jupyter + utils ---
+notebook
+ipykernel
+ipywidgets
