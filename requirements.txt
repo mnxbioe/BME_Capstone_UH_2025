@@ -18,8 +18,11 @@ h5py
 scikit-learn
 mne
 pyyaml
+tdt
 
 # --- Jupyter + utils ---
 notebook
 ipykernel
 ipywidgets
+
+
