@@ -22,7 +22,12 @@ tdt
 
 # --- Jupyter + utils ---
 notebook
+jupyterlab
 ipykernel
 ipywidgets
+nbformat
+nbconvert
+
+
 
 
