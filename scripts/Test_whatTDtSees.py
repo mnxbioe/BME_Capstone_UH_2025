@@ -14,14 +14,14 @@ print("\nEpoc stores:", list(blk.epocs.keys()))
 print("Stream stores:", list(blk.streams.keys()))
 
 # --- Inspect all streams systematically ---
-print("\n🔍 Stream summaries:")
+print("\n Stream summaries:")
 for name, stream in blk.streams.items():
     data = stream.data
     print(f"  {name:<6} shape={data.shape}, fs={stream.fs:.2f} Hz, "
           f"duration={data.shape[-1]/stream.fs:.2f}s")
 
 # --- Inspect all epocs ---
-print("\n🔍 Epoc summaries:")
+print("\n Epoc summaries:")
 for name, ep in blk.epocs.items():
     print(f"  {name:<6} n={len(ep.onset)}, first_onset={ep.onset[0] if len(ep.onset)>0 else 'None'}")
 

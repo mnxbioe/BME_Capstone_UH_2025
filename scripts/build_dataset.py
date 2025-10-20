@@ -4,20 +4,21 @@
 # Optional aggregate across blocks goes to: data/processed/<session>/...
 
 from __future__ import annotations
-import sys, json, argparse
+import sys, os, json, argparse
 from pathlib import Path
 import numpy as np
 import pandas as pd
 from inspect import signature
-from bme_capstone.dataio.feature_bank import compute_features, compute_stim_currents_table
 
-
-# --- make src importable no matter where we run this script ---
-ROOT = Path(__file__).resolve().parents[1]          # repo root
+# --- Make src importable no matter where we run this script ---
+ROOT = Path(__file__).resolve().parents[1]   # repo root
 SRC  = ROOT / "src"
+
+os.chdir(ROOT)                               # ensure working dir = repo root
 if str(SRC) not in sys.path:
-    sys.path.append(str(SRC))
-    sys.path.append(str(SRC / "bme_capstone"))
+    sys.path.insert(0, str(SRC))
+if str(SRC / "bme_capstone") not in sys.path:
+    sys.path.insert(0, str(SRC / "bme_capstone"))
 
 
 # --- our package bits ---
@@ -27,7 +28,12 @@ from bme_capstone.dataio.tdt_reader import (
 from bme_capstone.dataio.event_indexer import (
     WindowSet, make_trial_table
 )
-from bme_capstone.dataio.feature_bank import compute_features
+
+from bme_capstone.dataio.feature_bank import (
+    compute_features,
+    compute_stim_currents_table,   # ← add this
+)
+
 from bme_capstone.dataio.target_builder import build_tensors_v0
 
 # optional (stim-fallback) – present if you added it
