@@ -1,3 +1,12 @@
+"""
+Purpose
+--------
+converts raw TDT event markers (epocs) into a per-trial
+DataFrame. Each row corresponds to a single stimulation event, with
+timestamps, inter-stimulus intervals, burst grouping, and window
+flags used for later feature extraction.
+"""
+
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, Mapping, Optional, Tuple, Iterable, List
@@ -12,7 +21,9 @@ from .tdt_reader import (
 @dataclass(frozen=True)
 class WindowSet:
     """
-    A named collection of windows in seconds relative to epoc onset.
+    A container for named time windows relative to each epoc onset.
+    These define the time intervals. later used for slicing LFP and stim data around
+    each stimulus pulse.
     Example:
         WindowSet({
             "overlay":  (-0.050, 0.150),
@@ -24,6 +35,11 @@ class WindowSet:
     windows: Mapping[str, Tuple[float, float]]
 
 def _stream_lengths_and_fs(tdt_obj, streams: Iterable[str]) -> Tuple[Dict[str, int], Dict[str, float]]:
+    """
+    For each stream record total length (# of samples)
+    and sampling rate (Hz). to verify if a trial windows
+    would fall outside the available data.
+    """
     lengths, fs_map = {}, {}
     for k in streams:
         st = tdt_obj.streams[k]
@@ -40,7 +56,9 @@ def _in_bounds_mask(
     fs_map: Mapping[str, float],
     require_streams: Iterable[str],
 ) -> np.ndarray:
-    """True if [t0+pre, t0+post] is fully inside every required stream."""
+    """True if [t0+pre, t0+post] is fully inside every required stream.
+    prevents slicing errors when events occur too close to a blocks start/end
+    """
     pre, post = win
     ok = np.ones(onsets.size, dtype=bool)
     for s in require_streams:
@@ -53,6 +71,7 @@ def _in_bounds_mask(
 
 def _burst_ids(isi_ms: np.ndarray, gap_ms: float) -> np.ndarray:
     """
+    groups consecutive pulses into bursts
     Assign a burst id that increments whenever the inter-stimulus interval exceeds gap_ms.
     First pulse gets burst_id 0.
     """
@@ -72,21 +91,33 @@ def make_trial_table(
     burst_gap_ms: float = 5.0,
 ) -> pd.DataFrame:
     """
-    Build a tidy per-event table from a TDT block.
+    Build a per-event table from a TDT block.
 
-    Columns (always):
-      trial, t0_sec, t1_sec, isi_ms
+    Each row = one stimulus onset.
+    Columns describe timing, burst grouping, and optional in-bounds flags.
 
+    ------------------------------------------------------------
+    Always included columns:
+        trial       → integer trial index (0, 1, 2, ...)
+        t0_sec      → onset time in seconds
+        t1_sec      → offset time (if available, else NaN)
+        isi_ms      → inter-stimulus interval (difference between successive t0s)
+    
     Optional columns:
-      burst_id (if burst_gap_ms is not None)
-      in_bounds_<winname> (if windows and require_streams_for_bounds provided)
-
+        burst_id        → group index for bursts (if burst_gap_ms set)
+        in_bounds_<win> → boolean flags per window (if windows provided)
+    
+    ------------------------------------------------------------
     Args:
-      epoc_key: which epoc store to use (default: auto-selects)
-      windows:  named windows to check for in-bounds
-      require_streams_for_bounds: list of streams that must all contain each window
-                                  (default: [auto.lfp] + [auto.stim if present])
-      burst_gap_ms: threshold to split bursts on ISI (None to disable)
+        tdt_obj : full TDT block object (from tdt.read_block)
+        epoc_key : name of event store (default auto-selects using heuristics)
+        windows : WindowSet defining the analysis windows to check
+        require_streams_for_bounds : which streams must contain each window;
+                                     defaults to [auto.lfp] + [auto.stim if present]
+        burst_gap_ms : ISI threshold (ms) above which a new burst_id is created
+
+    Returns:
+        pandas.DataFrame  — one row per event with timing and validation metadata.
     """
     picks = auto_select_stores(tdt_obj)
     epoc = epoc_key or picks.epoc

@@ -1,10 +1,36 @@
 # src/bme_capstone/dataio/tdt_reader.py
 """
-Thin TDT I/O wrapper:
-- read a block
-- auto-pick stores (epoc/lfp/stim)
-- summarize basic metadata
-- utility helpers for streams and epoching
+Purpose:
+──────────────────────────────────────────────
+TDT blocks store all signals recorded during an experiment:
+  • LFP / Wav streams  -> neural signals
+  • Stim streams       -> stimulation currents (IZn1 / sSig / sOut)
+  • Epoc stores        -> event markers (PC1_ / PT1_)
+
+This file standardizes how those signals are accessed and named
+──────────────────────────────────────────────
+Main features
+──────────────────────────────────────────────
+1. **read_block(path)**  
+   Loads a full TDT block from disk
+
+2. **auto_select_stores(tdt_obj)**  
+   Automatically identifies the most likely epoc, LFP, and stim stores
+   using name heuristics 
+
+3. **get_stream(tdt_obj, name)**  
+   Returns the sampling rate, waveform array, and scale factorr
+
+4. **get_event_onsets(tdt_obj, epoc_name)**  
+   Extracts onset times for stimulation or task events.
+
+5. **quick_summary(tdt_obj)**  
+   Generates a dictionary of block-level metadata
+   (duration, store counts, event count, stim amplitude statistics...)
+   — used for sanity checks, logs, and data indexing.
+
+6. **epoch_lfp(...)**  
+   extracts LFP segments around each event for visualization.
 
 All params are defined inside this file for now.
 """
@@ -20,46 +46,59 @@ import tdt
 
 # ---------- defaults (local-only for now) ----------
 # epoch windows used by higher-level feature extraction / quick sanity checks
-BASELINE = (-0.200, 0.000)      # seconds
-RESPONSE = (0.0125, 0.100)      # seconds
-STIM_WIN = (-0.001, 0.005)      # seconds
+BASELINE = (-0.200, 0.000)      # seconds window (Used to compute RMS baseline LFP before stimulation.)
+RESPONSE = (0.0125, 0.100)      # Matches Dr Francis paper, used in RMS calculation
+STIM_WIN = (-0.001, 0.005)      # extracted snippet length = 6 ms total.
 
 
-# ---------- small utilities ----------
+# ---------- small utilities ( helper functions) ----------
+#Convert any duration-like object to a float in seconds to ensures downstream code receives a numeric duration.: 
 def _as_seconds_duration(d) -> float:
     return d.total_seconds() if hasattr(d, "total_seconds") else float(d)
 
+#generic pattern matcher (used in auto_select_store)
 def _first_match(keys: Iterable[str], preds: Iterable) -> Optional[str]:
-    for k in keys:
-        for p in preds:
+    for k in keys:                         #A list of all store names in a TDT block
+        for p in preds:                    #lsit of true of false predicated outputs 
             if p(k):
-                return k
-    return None
+                return k                   # moment one predicate returns True return that key
+    return None                            # picks the most appropriate epoc (PC1/ → PT1/ → U11/) 
 
+#collapse multi-channel data into a single avg (used for computing median stim across channels)
 def _mean_across_channels(x: np.ndarray) -> np.ndarray:
     x = np.asarray(x)
     if x.ndim == 2:
-        return x.mean(axis=0)
+        return x.mean(axis=0)  #Computes column wise mean
     return x
 
+#extract a segment based on time(s),instead of sample indices.
 def _slice_by_seconds(data: np.ndarray, fs: float, t0: float, t1: float) -> np.ndarray:
+    # Convert the time to a sample index.:
+     # Multiply by sampling rate (fs) → seconds → samples.
+     # floor() to include starting sample.
+     # max() ensures the index is not negative.
     i0 = max(0, int(np.floor(t0 * fs)))
+    # ceil() to ensure we include the last sample within the window.
+    # min(len(data), ...) ensures the index does not exceed array length.
     i1 = min(len(data), int(np.ceil(t1 * fs)))
     if i1 <= i0:
-        return np.asarray([], dtype=float)
+        return np.asarray([], dtype=float) # empty array if wind is invalid
     return data[i0:i1]
 
+#Compute RMS 
 def _rms(x: np.ndarray) -> float:
     x = np.asarray(x, dtype=float).ravel()
     return float(np.sqrt(np.mean(x**2))) if x.size else np.nan
 
 
 # ---------- public datatypes ----------
+#Holds the automatically detected store names from a TDT block.
 @dataclass
 class AutoStores:
     epoc: str
     lfp: str
     stim: Optional[str]  # may be None if stim stream absent
+
 
 @dataclass
 class StreamInfo:
@@ -83,7 +122,7 @@ class BlockSummary:
 # ---------- core API ----------
 def read_block(path: str):
     td = tdt.read_block(path)
-    # Make sure we have a block path for summaries/provenance
+    # Make sure we have a block path for summaries
     try:
         _ = getattr(td.info, "blockpath")
     except Exception:
@@ -94,17 +133,18 @@ def read_block(path: str):
     return td
 
 
-
+#Takes argument: tdt_obj, which is the block object returned by tdt.read_block(path).
+#will return an AutoStores dataclass
 def auto_select_stores(tdt_obj) -> AutoStores:
     """
-    Heuristics:
+    Heuristics(RULES):
       epoc: prefer PC*, then PT*, then U*
       lfp : prefer 'LFP*', else 'Wav*'
       stim: prefer exact 'IZn1', else 'sSig', else 'sOut', else first 'IZn*'
     """
     epoc_key = _first_match(
         tdt_obj.epocs.keys(),
-        preds=[
+        preds=[ #rules
             lambda k: k.lower().startswith("pc"),
             lambda k: k.lower().startswith("pt"),
             lambda k: k.lower().startswith("u"),
@@ -116,7 +156,7 @@ def auto_select_stores(tdt_obj) -> AutoStores:
 
     lfp_key = _first_match(
         tdt_obj.streams.keys(),
-        preds=[lambda k: "lfp" in k.lower(), lambda k: "wav" in k.lower()],
+        preds=[lambda k: k.lower() == "wav1", lambda k: "lfp" in k.lower(), lambda k: k.lower().startswith("wav")],#rules
     )
     if lfp_key is None:
         raise RuntimeError("No LFP/Wav-like stream found.")
@@ -152,8 +192,7 @@ def get_event_onsets(tdt_obj, epoc_name: str) -> np.ndarray:
 
 def quick_summary(tdt_obj) -> dict:
     """
-    Produce a compact dict (serializable) for quick smoke tests and logs.
-    Mirrors the shape of the example you printed.
+    Produce a compact dict for test and logs.
     """
     duration = _as_seconds_duration(getattr(tdt_obj.info, "duration", 0.0))
     auto = auto_select_stores(tdt_obj)
@@ -201,10 +240,10 @@ def quick_summary(tdt_obj) -> dict:
 
 
 
-# ---------- convenience: epoch LFP quickly (for quicklooks) ----------
+# ---------- convenience: epoch LFP (for quicklooks) ----------
 def epoch_lfp(tdt_obj, onsets: np.ndarray, lfp_name: str, window: Tuple[float, float]) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Extract simple single-channel LFP epochs by averaging across channels
+    Extract single-channel LFP epochs by averaging across channels
     and returning (time_vector_sec, epochs [n_trials, n_samples]).
     This is only for quick sanity plots; real feature extraction happens later.
     """

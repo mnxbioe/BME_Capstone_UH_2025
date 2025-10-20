@@ -1,6 +1,6 @@
 # src/bme_capstone/dataio/feature_bank.py
 """
-Small, opinionated feature set for v0:
+Small feature set for v0 ( for testing dataio):
 - LFP baseline RMS
 - LFP response RMS
 - (if available) stim window: mean, abs_max, RMS
@@ -115,3 +115,67 @@ def compute_features(
         ))
 
     return pd.DataFrame(rows)
+
+# === Tower A helper: per-electrode current vectors ============================
+from typing import List
+
+def compute_stim_currents_table(
+    tdt_obj,
+    trial_table: pd.DataFrame,
+    stim_name: Optional[str] = None,
+    first_phase_sec: float = 0.0005,  # 0.5 ms; covers typical first phase (~200 µs)
+) -> pd.DataFrame:
+    """
+    Build I^{(n)} for Tower A: one signed scalar per electrode, per trial.
+    We estimate the signed amplitude from the *leading phase* of each pulse:
+      1) slice [t0, t0 + first_phase_sec]
+      2) find index of max |value|
+      3) use that sample's sign * magnitude as I_j^{(n)}
+
+    This gives a physically meaningful current per electrode suitable for
+    Neumann BCs (source/sink) in the Laplace PINN.
+
+    Returns:
+      DataFrame with columns:
+        trial, t0_sec, I_ch00, I_ch01, ..., I_ch{nch-1}
+      If no stim stream exists, returns an empty DataFrame with just trial/t0_sec.
+      Charge-balanced biphasic pulses have near-zero mean, so we can’t use mean.
+    """
+    picks = auto_select_stores(tdt_obj)
+    stim_key = stim_name or picks.stim
+    if not stim_key:
+        # No stim in this block → return trial/t0 only
+        return trial_table[["trial", "t0_sec"]].copy()
+
+    fs_stim, stim_data, _ = get_stream(tdt_obj, stim_key)  # shape: (nch, n) or (n,)
+    stim_arr = np.asarray(stim_data)
+
+    # Ensure 2-D: (nch, n_samples)
+    if stim_arr.ndim == 1:
+        stim_arr = stim_arr[None, :]
+
+    nch, _ = stim_arr.shape
+    # Precompute column names to keep geometry ordering stable
+    I_cols: List[str] = [f"I_ch{idx:02d}" for idx in range(nch)]
+
+    rows = []
+    for _, r in trial_table.iterrows():
+        t0 = float(r["t0_sec"])
+        # Slice only the *leading phase* window
+        i0 = max(0, int(np.floor(t0 * fs_stim)))
+        i1 = max(i0, int(np.ceil((t0 + first_phase_sec) * fs_stim)))
+
+        I_vec = np.full(nch, np.nan, dtype=float)
+        for ch in range(nch):
+            s = stim_arr[ch, i0:i1]
+            if s.size == 0:
+                continue
+            # signed amplitude = sign(sample_at_absmax) * absmax
+            k = int(np.argmax(np.abs(s)))
+            I_vec[ch] = float(np.sign(s[k]) * np.abs(s[k]))
+
+        row = {"trial": int(r["trial"]), "t0_sec": t0}
+        row.update({col: I_vec[i] for i, col in enumerate(I_cols)})
+        rows.append(row)
+
+    return pd.DataFrame(rows, columns=["trial", "t0_sec"] + I_cols)

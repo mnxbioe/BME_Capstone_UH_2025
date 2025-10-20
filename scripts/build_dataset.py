@@ -9,12 +9,16 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from inspect import signature
+from bme_capstone.dataio.feature_bank import compute_features, compute_stim_currents_table
+
 
 # --- make src importable no matter where we run this script ---
 ROOT = Path(__file__).resolve().parents[1]          # repo root
 SRC  = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.append(str(SRC))
+    sys.path.append(str(SRC / "bme_capstone"))
+
 
 # --- our package bits ---
 from bme_capstone.dataio.tdt_reader import (
@@ -91,6 +95,22 @@ def process_block(block_dir: Path,
     trials_csv = out_dir / "trials.csv"
     tt.to_csv(trials_csv, index=False)
 
+    # 3.5) Tower A currents table (per-electrode I^{(n)})
+    auto = auto_select_stores(blk)
+    I_df = compute_stim_currents_table(blk, tt, stim_name=auto.stim, first_phase_sec=0.0005)
+    I_csv = out_dir / "currents_table.csv"
+    I_df.to_csv(I_csv, index=False)
+
+    # Also save as NPZ for easy loading in Torch/PINA
+    I_cols = [c for c in I_df.columns if c.startswith("I_ch")]
+    I_np  = I_df[I_cols].to_numpy(dtype=np.float32) if I_cols else np.zeros((len(I_df), 0), np.float32)
+    np.savez_compressed(out_dir / "currents_table.npz",
+                        trial=I_df["trial"].to_numpy(np.int64),
+                        t0_sec=I_df["t0_sec"].to_numpy(np.float64),
+                        I=I_np,
+                        I_cols=np.array(I_cols, dtype=object))
+
+
     # 4) features (in-bounds filtering baked in)
     # unwrap WindowSet into a plain mapping for compute_features
     wmap = wins.windows if hasattr(wins, "windows") else wins
@@ -121,6 +141,8 @@ def process_block(block_dir: Path,
         "fs": {k: smry["streams"][k]["fs"] for k in smry["streams"]},
         "stim_absmax_median": smry["stim_absmax_median"],
         "used_stim_fallback": bool(used_fallback),
+        "I_cols": I_cols,                      # for current vector
+        "currents_table_csv": str(I_csv),      # ^^^
     }
     with open(out_dir / "manifest.json", "w") as f:
         json.dump(man, f, indent=2)
