@@ -1,13 +1,14 @@
 """Geometry helpers for Tower A (physics-informed field encoder).
 
-These utilities provide lightweight geometry descriptions that can be mapped
-onto PINA domain objects.  The current implementation focuses on 3-D
+These provide geometry descriptions that can be mapped
+onto PINA domain objects. implementation focuses on 3-D
 box-shaped tissue volumes with axis-aligned plane patches representing
-electrode contacts, insulating shanks, or outer boundaries.  This matches the
-assumptions described in the Tower A methods write-up and maps cleanly to
+electrode contacts, insulating shanks, or outer boundaries.  
+
+This matches the assumptions described in methods report and maps to
 PINA's :class:`CartesianDomain` sampling primitives.
 
-The abstractions are intentionally simple:
+The abstractions are simple:
 
 * :class:`Box3D` defines the padded tissue domain ``Omega``.
 * :class:`PlanePatch` captures an axis-aligned planar patch (disc/square
@@ -20,25 +21,21 @@ The geometry objects themselves are agnostic to boundary-condition values.
 Those are injected later when building the physics-informed problem.
 """
 
-from __future__ import annotations
-
+from __future__ import annotations # to avoid name error via a free reference classes that appear later in the file
 from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Mapping, MutableMapping, Optional, Tuple
+from pina.domain import CartesianDomain #a PINA class that represents a region of space in (x, y, z).
 
-from pina.domain import CartesianDomain
-
-Axis = str  # alias restricted to {"x", "y", "z"}
-
+#--------- coordinate safety net 
+Axis = str  # restricted to {"x", "y", "z"}
 _AXES: Tuple[Axis, Axis, Axis] = ("x", "y", "z")
-
-
 def _validate_axis(axis: Axis) -> Axis:
     """Validate that ``axis`` is one of the three Cartesian axes."""
     if axis not in _AXES:
         raise ValueError(f"Expected axis in {_AXES}, got {axis!r}")
     return axis
 
-
+#-- Verify simulation geometry is valid 
 def _ensure_limits(bounds: Tuple[float, float]) -> Tuple[float, float]:
     """Ensure bounds are ordered as (lo, hi) and non-degenerate."""
     lo, hi = map(float, bounds)
@@ -54,7 +51,7 @@ class Box3D:
     Parameters
     ----------
     x : tuple[float, float]
-        Lower/upper bounds along the x axis (millimetres assumed).
+        Lower/upper bounds along the x axis (millimetres ).
     y : tuple[float, float]
         Lower/upper bounds along the y axis.
     z : tuple[float, float]
@@ -64,7 +61,7 @@ class Box3D:
     x: Tuple[float, float]
     y: Tuple[float, float]
     z: Tuple[float, float]
-
+    #to prevent invalid sampling / inverted domains
     def __post_init__(self) -> None:
         object.__setattr__(self, "x", _ensure_limits(self.x))
         object.__setattr__(self, "y", _ensure_limits(self.y))
@@ -73,10 +70,10 @@ class Box3D:
     def to_domain(self) -> CartesianDomain:
         """Return the matching :class:`CartesianDomain`."""
         return CartesianDomain({"x": list(self.x), "y": list(self.y), "z": list(self.z)})
-
+    #Compute the size of the box
     @property
     def extents(self) -> Tuple[float, float, float]:
-        """Return the box edge lengths in each Cartesian direction."""
+        """Return the box edge lengths in each direction."""
         return (
             self.x[1] - self.x[0],
             self.y[1] - self.y[0],
@@ -95,7 +92,7 @@ class Box3D:
 
 @dataclass
 class PlanePatch:
-    """Axis-aligned planar patch representing an electrode or boundary surface.
+    """Axis-aligned(parallel) planar patch representing an electrode or boundary surface.
 
     The patch is described by fixing one axis to ``value`` and providing bounds
     along the remaining two axes through ``span``.
@@ -103,23 +100,27 @@ class PlanePatch:
     Parameters
     ----------
     name : str
-        Identifier used when registering the patch inside a
-        :class:`TowerAGeometry`.
+        Identifier used when registering:class:`TowerAGeometry`.
+
     axis : {"x", "y", "z"}
-        Cartesian axis orthogonal to the patch (i.e. the axis whose coordinate
-        is fixed).
+        Cartesian axis orthogonal to the patch
+
     value : float
         Coordinate value along ``axis`` where the plane lies.
+
     span : mapping[str, tuple[float, float]]
         Bounds for the remaining two axes. Keys must match the two axes other
         than ``axis``. Each tuple is interpreted as (lower, upper) bounds.
+
     normal_sign : int, optional
         Direction of the outward normal along ``axis``. ``+1`` denotes
         ``+axis`` and ``-1`` denotes ``-axis``. Defaults to ``+1``.
+        
     kind : str, optional
         Semantic tag for later boundary-condition assignment. Suggested values
-        include ``"contact"``, ``"shank"``, and ``"outer"``. The value has no
-        effect on geometry but is convenient when iterating surfaces.
+        include ``"contact"``, ``"shank"``, and ``"outer"``.  no
+        effect on geometry
+
     metadata : dict, optional
         Free-form storage for additional geometric information (e.g., electrode
         channel index).
@@ -149,6 +150,7 @@ class PlanePatch:
             cleaned[ax] = _ensure_limits(bounds)
         object.__setattr__(self, "span", cleaned)
 
+    #Calc area used when converting electrode currents to flux densities:
     @property
     def area(self) -> float:
         """Return the area of the rectangular patch."""
@@ -192,9 +194,9 @@ class TowerAGeometry:
         Interior padded domain ``Omega`` where the Laplace equation is enforced.
     contacts : list[PlanePatch]
         Planar patches representing stimulating/return contacts.  These are
-        typically tagged with ``kind="contact"``.
+        tagged with ``kind="contact"``.
     shanks : list[PlanePatch], optional
-        Insulating shank surfaces (usually zero-flux).  Defaults to an empty
+        Insulating shank surfaces (zero-flux).  Defaults to an empty
         list.
     outers : list[PlanePatch], optional
         Optional far-field boundaries (Dirichlet or zero-flux).  Defaults to an
@@ -212,8 +214,11 @@ class TowerAGeometry:
     def build_domains(self) -> Dict[str, CartesianDomain]:
         """Return the dictionary of domains expected by a PINA problem."""
         domains: Dict[str, CartesianDomain] = {
-            self.interior_name: self.volume.to_domain()
+            self.interior_name: self.volume.to_domain() #first line defines the main domain Ω
         }
+        #Each for loop adds a different kind of surface to the same dictionary, 
+        # using a prefix ("contact:", "shank:", "outer:")
+        # to make it easy to tell them apart later.
         for patch in self.contacts:
             domains[patch.domain_name("contact")] = patch.to_domain()
         for patch in self.shanks:
@@ -221,7 +226,19 @@ class TowerAGeometry:
         for patch in self.outers:
             domains[patch.domain_name("outer")] = patch.to_domain()
         return domains
+    
+        """TowerAGeometry
+            ├── volume: Box3D
+            │     └── → 1 interior CartesianDomain
+            ├── contacts: [PlanePatch, PlanePatch, ...]
+            │     └── → contact:E1, contact:E2, ...
+            ├── shanks: [PlanePatch, ...]
+            │     └── → shank:S1, shank:S2, ...
+            └── outers: [PlanePatch, ...]
+                └── → outer:top, outer:bottom, ..."""
 
+    # loop through different groups of surfaces (contacts, shanks, outers) 
+    # without having to know how they’re stored internally.:
     def iter_contacts(self) -> Iterable[PlanePatch]:
         """Iterate over electrode contact surfaces."""
         return iter(self.contacts)

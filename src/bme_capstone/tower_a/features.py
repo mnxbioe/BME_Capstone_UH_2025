@@ -35,27 +35,28 @@ def generate_cartesian_grid(
     if spacing <= 0:
         raise ValueError("Spacing must be positive.")
 
-    x_min, x_max = box.x
+    x_min, x_max = box.x #Box stores its bounds as tuples (lo, hi).
     y_min, y_max = box.y
     z_min, z_max = box.z
 
-    pad = float(padding)
+    pad = float(padding) #The + spacing / 2 ensures the upper bound is included vvvv
     xs = torch.arange(x_min - pad, x_max + pad + spacing / 2, spacing, dtype=dtype, device=device)
     ys = torch.arange(y_min - pad, y_max + pad + spacing / 2, spacing, dtype=dtype, device=device)
     zs = torch.arange(z_min - pad, z_max + pad + spacing / 2, spacing, dtype=dtype, device=device)
 
+    # Build the 3D mesh :
     grid_x, grid_y, grid_z = torch.meshgrid(xs, ys, zs, indexing="ij")
-    coords = torch.stack(
+    coords = torch.stack( # .reshape(-1) flattens each 3D array into a 1-D vector of all points.
         (grid_x.reshape(-1), grid_y.reshape(-1), grid_z.reshape(-1)),
-        dim=-1,
-    )
-    shape = (len(xs), len(ys), len(zs))
+        dim=-1, 
+    ) 
+    shape = (len(xs), len(ys), len(zs)) #combine them into an (N, 3) tensor where each row = (x, y, z) 
     return coords, shape
 
 
 @dataclass
 class FieldEvaluation:
-    """Structured container for evaluated field quantities."""
+    """container for evaluated field quantities."""
 
     coords: LabelTensor
     currents: torch.Tensor
@@ -65,7 +66,7 @@ class FieldEvaluation:
     current_density: Optional[LabelTensor] = None
 
     def as_dict(self) -> Dict[str, torch.Tensor]:
-        """Return tensors suitable for caching/serialisation."""
+        """Return tensors suitable for caching"""
         data: Dict[str, torch.Tensor] = {
             "coords": self.coords.tensor,
             "currents": self.currents,
@@ -86,7 +87,8 @@ class FieldEvaluator:
     def __init__(
         self,
         geometry: TowerAGeometry,
-        basis: Mapping[str, Union[SolverType, BasisTrainingResult]],
+        #basis is a dictionary mapping each contact name (string) to either a trained solver object or a full training result bundle.”
+        basis: Mapping[str, Union[SolverType, BasisTrainingResult]], #
         conductivity: Optional[ConductivityLike],
         *,
         axes: Axes = DEFAULT_AXES,
@@ -119,7 +121,7 @@ class FieldEvaluator:
         """Return the number of basis fields handled by the evaluator."""
         return len(self.contact_order)
 
-    def _standardise_currents(
+    def _standardise_currents( # ensures current tensor has right shape and matches # of contacts
         self,
         currents: Union[Sequence[Number], torch.Tensor],
         n_points: int,
@@ -127,13 +129,13 @@ class FieldEvaluator:
         dtype: torch.dtype,
     ) -> torch.Tensor:
         tensor = torch.as_tensor(currents, dtype=dtype, device=device)
-        if tensor.ndim == 1:
+        if tensor.ndim == 1: # for 1D cases 
             if tensor.shape[0] != self.n_contacts:
                 raise ValueError(
                     f"Expected {self.n_contacts} currents, got {tensor.shape[0]}"
                 )
             tensor = tensor.unsqueeze(0).repeat(n_points, 1)
-        elif tensor.ndim == 2:
+        elif tensor.ndim == 2: # for 2D cases 
             if tensor.shape[1] != self.n_contacts:
                 raise ValueError(
                     f"Expected current vectors of length {self.n_contacts}, got {tensor.shape[1]}"
@@ -147,8 +149,8 @@ class FieldEvaluator:
         else:
             raise ValueError("Currents must be 1-D or 2-D tensor-like.")
         return tensor
-
-    def evaluate(
+    #used to evaluate network at specified points in space ( inputs coordiantes and currents)
+    def evaluate( 
         self,
         coords: Union[Sequence[Sequence[Number]], torch.Tensor],
         currents: Union[Sequence[Number], torch.Tensor],
@@ -156,15 +158,16 @@ class FieldEvaluator:
         compute_gradients: bool = True,
         detach: bool = True,
     ) -> FieldEvaluation:
-        """Evaluate ``phi`` (and optionally ``E``/``J``) at arbitrary points."""
+        """Evaluate ``phi`` (and ``E``/``J``) at arbitrary points."""
         device = self.device or (coords.device if isinstance(coords, torch.Tensor) else torch.device("cpu"))
         dtype = self.dtype if not isinstance(coords, torch.Tensor) else coords.dtype
 
         coords_tensor = torch.as_tensor(coords, dtype=dtype, device=device)
         coords_tensor = coords_tensor.reshape(-1, len(self.axes))
-        coords_tensor.requires_grad_(compute_gradients)
-
+        coords_tensor.requires_grad_(compute_gradients) #whether to track derivatives of φ with respect to x,y,z.
+        #For PINA: Wrap the raw tensor in a LabelTensor, to track variable ("x", "y", "z").
         coords_lt = LabelTensor(coords_tensor, list(self.axes))
+        #properly shape tesnor compatible with coord
         currents_tensor = self._standardise_currents(currents, coords_tensor.shape[0], device, dtype)
 
         phi_total = torch.zeros(
