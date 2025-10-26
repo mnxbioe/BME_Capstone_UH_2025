@@ -10,6 +10,7 @@ from .pinn_field import (
     TowerABasisTrainer,
     TowerALaplaceProblem,
     evaluate_sigma_diag,
+    evaluate_sigma_matrix,
 )
 from .features import FieldEvaluation, FieldEvaluator, generate_cartesian_grid
 
@@ -24,6 +25,7 @@ __all__ = [
     "ConductivityLike",
     "DEFAULT_AXES",
     "evaluate_sigma_diag",
+    "evaluate_sigma_matrix",
     "FieldEvaluator",
     "FieldEvaluation",
     "generate_cartesian_grid",

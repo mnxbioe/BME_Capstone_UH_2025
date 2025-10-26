@@ -17,7 +17,7 @@ from .pinn_field import (
     ConductivityLike,
     DEFAULT_AXES,
     SolverType,
-    evaluate_sigma_diag,
+    evaluate_sigma_matrix,
 )
 
 Number = Union[int, float]
@@ -199,9 +199,10 @@ class FieldEvaluator:
             e_mag = LabelTensor(magnitude, ["|E|"])
 
             if self.conductivity is not None:
-                sigma_diag = evaluate_sigma_diag(self.conductivity, coords_lt, self.axes)
+                sigma_matrix = evaluate_sigma_matrix(self.conductivity, coords_lt, self.axes)
+                j_tensor = torch.einsum("bij,bj->bi", sigma_matrix, e_tensor)
                 current_density = LabelTensor(
-                    sigma_diag * e_tensor,
+                    j_tensor,
                     [f"J_{ax}" for ax in self.axes],
                 )
 
