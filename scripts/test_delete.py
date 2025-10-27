@@ -28,8 +28,8 @@ geometry = TowerAGeometry(volume=volume, contacts=contacts)
 # 2. Define conductivity and stimulation current
 # --------------------------------------------------------------------
 sigma = 0.3  # S/m, typical gray matter conductivity
+contact_currents = {"E2": -10e-6}  # 10 µA injected on E1
 contact_currents = {"E1": 10e-6}  # 10 µA injected on E1
-
 # --------------------------------------------------------------------
 # 3. Build the Tower-A Laplace problem
 # --------------------------------------------------------------------

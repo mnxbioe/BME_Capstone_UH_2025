@@ -102,6 +102,7 @@ def _as_tensor(value: TensorLike, input_: LabelTensor, components: int = 1) -> t
 
     return tensor
 
+NET_CURRENT_TOL: float = 1e-12
 
 def _evaluate_scalar(value: BoundaryValueLike, input_: LabelTensor) -> torch.Tensor:
     """Evaluate a scalar boundary target on ``input_`` points."""

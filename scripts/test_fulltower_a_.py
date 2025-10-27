@@ -9,7 +9,7 @@ from lightning.pytorch.callbacks import EarlyStopping
 
 early_stop = EarlyStopping(
     monitor="pde_loss",      # <── matches the logged metric name
-    min_delta=1e-12,
+    min_delta=1e-14,
     patience=25,
     mode="min",
 )
@@ -68,7 +68,7 @@ I = 10e-6  # 10 µA
 patterns = {
     "left_only":  {"E_left": I,  "E_right": 0.0},
     "right_only": {"E_left": 0.0,"E_right": -I},
-    "both":       {"E_left": +I,  "E_right": -I},
+    "both":       {"E_left": I,  "E_right": -I},
 }
 
 # Dirichlet outer BC (φ=0) on the top/bottom planes
