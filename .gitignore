@@ -64,3 +64,7 @@ Thumbs.db
 # --- Jupyter notebooks (ignore all except 00_setup.ipynb) ---
 
 
+towerA_geometry_contract.json
+towerA_geometry_contract_16.json
+towerA_geometry_contract_2x8.json
+towerA_geometry_contract_2x8_audit.json

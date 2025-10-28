@@ -1,18 +1,18 @@
-"""Geometry helpers for Tower A (physics-informed field encoder).
+"""Geometry helpers for Tower A
 
 These provide geometry descriptions that can be mapped
-onto PINA domain objects. implementation focuses on 3-D
-box-shaped tissue volumes with axis-aligned plane patches representing
-electrode contacts, insulating shanks, or outer boundaries.  
+onto PINA domain objects. 
 
-This matches the assumptions described in methods report and maps to
-PINA's :class:`CartesianDomain` sampling primitives.
+implementation focuses on 3-D box-shaped tissue volumes
+axis-aligned plane patches representing
+    - electrode contacts
+    - insulating shanks
+    - outer boundaries.  
 
-The abstractions are simple:
+Matches the Geometry Contract and maps to PINA's :class:`CartesianDomain` 
 
 * :class:`Box3D` defines the padded tissue domain ``Omega``.
-* :class:`PlanePatch` captures an axis-aligned planar patch (disc/square
-  approximation) together with its outward normal.
+* :class:`PlanePatch` captures an axis-aligned planar patch (disc/square) together with its outward normal.
 * :class:`TowerAGeometry` groups the interior domain and surface patches, and
   exposes helpers to build the dictionaries expected by a custom
   :class:`~pina.problem.SpatialProblem`.
@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Mapping, MutableMapping, Optional, Tuple
 from pina.domain import CartesianDomain #a PINA class that represents a region of space in (x, y, z).
 
-#--------- coordinate safety net 
+# Coordinate safety net 
 Axis = str  # restricted to {"x", "y", "z"}
 _AXES: Tuple[Axis, Axis, Axis] = ("x", "y", "z")
 def _validate_axis(axis: Axis) -> Axis:
@@ -70,6 +70,7 @@ class Box3D:
     def to_domain(self) -> CartesianDomain:
         """Return the matching :class:`CartesianDomain`."""
         return CartesianDomain({"x": list(self.x), "y": list(self.y), "z": list(self.z)})
+    
     #Compute the size of the box
     @property
     def extents(self) -> Tuple[float, float, float]:
@@ -82,7 +83,7 @@ class Box3D:
 
     @property
     def center(self) -> Tuple[float, float, float]:
-        """Return the box centre coordinates."""
+        """geometric center (midpoint) of the box in 3-D space."""
         return (
             (self.x[0] + self.x[1]) * 0.5,
             (self.y[0] + self.y[1]) * 0.5,
@@ -150,31 +151,33 @@ class PlanePatch:
             cleaned[ax] = _ensure_limits(bounds)
         object.__setattr__(self, "span", cleaned)
 
-    #Calc area used when converting electrode currents to flux densities:
+    #Calc area (used when converting electrode currents to flux densities)
     @property
     def area(self) -> float:
         """Return the area of the rectangular patch."""
         lengths = [bounds[1] - bounds[0] for bounds in self.span.values()]
-        return lengths[0] * lengths[1]
+        return lengths[0] * lengths[1] #area
 
     @property
     def normal(self) -> Tuple[float, float, float]:
-        """Return the unit normal vector pointing outward from the tissue domain."""
+        """Return the unit normal vector pointing outward from the tissue domain 
+        (perpindicular to the plane)."""
         idx = _AXES.index(self.axis)
         vec = [0.0, 0.0, 0.0]
         vec[idx] = float(self.normal_sign)
         return tuple(vec)
 
     def to_domain(self) -> CartesianDomain:
-        """Build the :class:`CartesianDomain` representing the planar patch."""
+        """Build the planar patch. which PINA uses to sample training points 
+        along that plane(newman or Dic..)"""
         domain_dict = {self.axis: float(self.value)}
         for ax, bounds in self.span.items():
             domain_dict[ax] = [float(bounds[0]), float(bounds[1])]
         return CartesianDomain(domain_dict)
 
     def domain_name(self, prefix: Optional[str] = None) -> str:
-        """Return a domain key suitable for :class:`TowerAGeometry`.
-
+        """Return a string identifer for patches 
+        helps assemble `TowerAGeometry`.
         Parameters
         ----------
         prefix : str, optional
@@ -183,25 +186,23 @@ class PlanePatch:
         tag = prefix or self.kind
         return f"{tag}:{self.name}"
 
-
+####################################################################################
+# Assemble TowerAGeometry
 @dataclass
 class TowerAGeometry:
-    """Container for the geometry required by the Tower A PINN.
-
-    Parameters
+    """Container for the geometry
     ----------
     volume : Box3D
-        Interior padded domain ``Omega`` where the Laplace equation is enforced.
+        Interior domain where the Laplace equation is enforced.
     contacts : list[PlanePatch]
-        Planar patches representing stimulating/return contacts.  These are
-        tagged with ``kind="contact"``.
-    shanks : list[PlanePatch], optional
-        Insulating shank surfaces (zero-flux).  Defaults to an empty
-        list.
-    outers : list[PlanePatch], optional
-        Optional far-field boundaries (Dirichlet or zero-flux).  Defaults to an
-        empty list.
-    interior_name : str, optional
+        Planar patches representing stimulating/return contacts. 
+         These are tagged with ``kind="contact"``.
+    shanks : list[PlanePatch], (optional)
+        Insulating shank surfaces (zero-flux).  
+        Defaults to an empty list.
+    outers : list[PlanePatch], 
+        far-field boundaries (Dirichlet or zero-flux).
+    interior_name : str, (optional)
         Dictionary key used for the interior domain. Defaults to ``"interior"``.
     """
 
