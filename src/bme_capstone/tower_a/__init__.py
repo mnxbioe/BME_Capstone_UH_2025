@@ -19,6 +19,8 @@ __all__ = [
     "Box3D",
     "PlanePatch",
     "TowerAGeometry",
+    "outer_faces_from_box",
+    "make_gauge_patch",
     "TowerALaplaceProblem",
     "TowerABasisTrainer",
     "BasisTrainingResult",
