@@ -265,8 +265,7 @@ class TowerAGeometry:
         names.extend(p.domain_name("shank") for p in self.shanks)
         names.extend(p.domain_name("outer") for p in self.outers)
         return names
-# new util (or add to geometry.py)
-from bme_capstone.tower_a.geometry import PlanePatch, Box3D, TowerAGeometry
+
 
 def outer_faces_from_box(box: Box3D, pad_kind="outer"):
     x0, x1 = box.x; y0, y1 = box.y; z0, z1 = box.z
@@ -278,3 +277,14 @@ def outer_faces_from_box(box: Box3D, pad_kind="outer"):
         PlanePatch(name="z_lo", axis="z", value=z0, span={"x": (x0,x1), "y": (y0,y1)}, normal_sign=-1, kind=pad_kind),
         PlanePatch(name="z_hi", axis="z", value=z1, span={"x": (x0,x1), "y": (y0,y1)}, normal_sign=+1, kind=pad_kind),
     ]
+def make_gauge_patch(box: Box3D, r0: float = 1.5, phi: float = 0.0) -> PlanePatch:
+    """Return the Dirichlet reference patch Γ₀ on the +Z face."""
+    return PlanePatch(
+        name="Γ0",
+        axis="z",
+        value=box.z[1],
+        span={"x": (-r0, r0), "y": (-r0, r0)},  # square approx of 1.5 mm radius
+        normal_sign=+1,
+        kind="outer",
+        metadata={"bc_type": "dirichlet", "phi_V": phi}
+    )
