@@ -37,6 +37,7 @@ from bme_capstone.tower_a.pinn_field import NET_CURRENT_TOL, TowerABasisTrainer
 DEFAULT_SEED = 2025
 DEFAULT_SLICE_LIMITS = (-2.0, 2.0)
 DEFAULT_SLICE_Z = 0.5
+DEFAULT_VAL_SPLIT = 0.1
 
 
 def parse_args() -> argparse.Namespace:
@@ -103,6 +104,35 @@ def parse_args() -> argparse.Namespace:
         "--matplotlib-backend",
         default="TkAgg",
         help='Backend used if plots are enabled (e.g., "TkAgg", "Agg", "QtAgg").',
+    )
+    parser.add_argument(
+        "--val-split",
+        type=float,
+        default=DEFAULT_VAL_SPLIT,
+        help="Fraction of collocation points reserved for validation (0 disables validation).",
+    )
+    parser.add_argument(
+        "--patience",
+        type=int,
+        default=50,
+        help="Early stopping patience in epochs.",
+    )
+    parser.add_argument(
+        "--min-delta",
+        type=float,
+        default=0.0,
+        help="Minimum improvement required to reset early stopping patience.",
+    )
+    parser.add_argument(
+        "--contact-samples",
+        type=int,
+        default=4_000,
+        help="Sample count per contact for current flux verification.",
+    )
+    parser.add_argument(
+        "--no-anchor",
+        action="store_true",
+        help="Do not subtract a common reference potential when computing superposition error.",
     )
     return parser.parse_args()
 
@@ -252,7 +282,8 @@ def report_contact_conditions(problem, label: str) -> None:
         if not key.startswith("contact"):
             continue
         any_contacts = True
-        print(f"  {summary.surface.name:10s} ({summary.condition_type}) -> {summary.description}")
+        desc = summary.description.replace("\u00b2", "^2").replace("\u00b5", "u")
+        print(f"  {summary.surface.name:10s} ({summary.condition_type}) -> {desc}")
     if not any_contacts:
         print("  (no contact conditions registered)")
 
@@ -264,6 +295,35 @@ def _infer_model_device(model: torch.nn.Module) -> torch.device:
         return torch.device("cpu")
 
 
+def estimate_contact_currents(
+    problem, model, *, samples_per_contact: int, conductivity: float
+) -> Dict[str, Tuple[float, float]]:
+    """Monte Carlo estimate of injected current on each contact (Amp, std)."""
+    device = _infer_model_device(model)
+    params = list(model.parameters())
+    dtype = params[0].dtype if params else torch.float32
+    results: Dict[str, Tuple[float, float]] = {}
+    for patch in problem.geometry.contacts:
+        domain = problem.domains[patch.domain_name("contact")]
+        draw = domain.sample(n=samples_per_contact, mode="random")
+        pts = draw.tensor if isinstance(draw, LabelTensor) else draw
+        pts = LabelTensor(pts.to(device=device, dtype=dtype), labels=["x", "y", "z"])
+        pts.requires_grad_(True)
+
+        out = model(pts)
+        tensor = out.tensor if isinstance(out, LabelTensor) else out
+        phi = LabelTensor(tensor, labels=["phi"])
+
+        grad_phi = grad(phi, pts, components=["phi"], d=["x", "y", "z"])
+        normal = torch.tensor(patch.normal, device=device, dtype=dtype).view(3, 1)
+        normal_flux = grad_phi.tensor @ normal  # [N,1]
+        flux_density = conductivity * normal_flux.squeeze(-1)
+        mean_current = flux_density.mean() * patch.area
+        std_current = flux_density.std(unbiased=False) * patch.area
+        results[patch.name] = (float(mean_current.cpu()), float(std_current.cpu()))
+    return results
+
+
 def build_and_train(
     trainer: TowerABasisTrainer,
     currents: Mapping[str, float],
@@ -272,6 +332,8 @@ def build_and_train(
     discretisation_kwargs: Dict,
     solver_kwargs: Dict,
     trainer_kwargs: Dict,
+    train_fraction: float,
+    val_fraction: float,
 ):
     problem = trainer.build_problem(contact_currents=currents, outer_bc=outer_bc)
     trainer.discretise(problem, **discretisation_kwargs)
@@ -279,8 +341,8 @@ def build_and_train(
     solver = trainer.solver_cls(problem=problem, model=model, **solver_kwargs)
     trainer_obj = trainer.Trainer(
         solver=solver,
-        train_size=1.0,
-        val_size=0.0,
+        train_size=train_fraction,
+        val_size=val_fraction,
         test_size=0.0,
         batch_size=None,
         **trainer_kwargs,
@@ -292,9 +354,11 @@ def build_and_train(
 def eval_phi(model: torch.nn.Module, xs, ys, zs):
     X, Y, Z = np.meshgrid(xs, ys, zs, indexing="ij")
     device = _infer_model_device(model)
+    params = list(model.parameters())
+    dtype = params[0].dtype if params else torch.float32
     pts = torch.tensor(
         np.stack([X.ravel(), Y.ravel(), Z.ravel()], axis=1),
-        dtype=torch.float32,
+        dtype=dtype,
         device=device,
     )
     with torch.no_grad():
@@ -319,10 +383,45 @@ def pde_residual_mean(problem, model, n: int = 5_000) -> float:
     return float(residual.abs().mean().cpu())
 
 
-def compute_superposition_error(phi_left, phi_right, phi_both) -> float:
-    numerator = np.mean(np.abs((phi_left + phi_right) - phi_both))
-    denom = np.maximum(1e-9, np.mean(np.abs(phi_both)))
-    return float(numerator / denom)
+def compute_superposition_error(phi_left, phi_right, phi_both, *, anchor: bool = True) -> Tuple[float, float]:
+    """Return (raw_rel_err, anchored_rel_err). Anchored value equals raw if anchor=False."""
+
+    def l2(arr: np.ndarray) -> float:
+        return float(np.linalg.norm(arr.reshape(-1), ord=2))
+
+    raw_diff = (phi_left + phi_right) - phi_both
+    raw_denom = max(1e-12, l2(phi_both))
+    raw_rel = l2(raw_diff) / raw_denom
+
+    if not anchor:
+        return raw_rel, raw_rel
+
+    idx = (phi_both.shape[0] // 2, phi_both.shape[1] // 2, 0)
+
+    def anchored(field: np.ndarray) -> np.ndarray:
+        return field - field[idx]
+
+    left_a = anchored(phi_left)
+    right_a = anchored(phi_right)
+    both_a = anchored(phi_both)
+    anchored_diff = (left_a + right_a) - both_a
+    anchored_denom = max(1e-12, l2(both_a))
+    anchored_rel = l2(anchored_diff) / anchored_denom
+    return raw_rel, anchored_rel
+
+
+def describe_slice_stats(name: str, field: np.ndarray) -> None:
+    stats = {
+        "mean": float(field.mean()),
+        "std": float(field.std()),
+        "min": float(field.min()),
+        "max": float(field.max()),
+    }
+    print(
+        f"Slice stats {name:>10s} -> "
+        f"mean={stats['mean']:+.3e}, std={stats['std']:+.3e}, "
+        f"min={stats['min']:+.3e}, max={stats['max']:+.3e}"
+    )
 
 
 def maybe_plot(
@@ -383,17 +482,22 @@ def main() -> None:
     patterns = select_patterns(all_patterns, args.pattern)
     describe_currents(patterns, has_dirichlet_ground=has_dirichlet)
 
+    val_split = max(0.0, min(0.4, args.val_split))
+    monitor_metric = "val_loss" if val_split > 0.0 else "train_loss"
     early_stop = EarlyStopping(
-        monitor="pde_loss",
-        min_delta=1.0e-8,
-        patience=25,
+        monitor=monitor_metric,
+        min_delta=args.min_delta,
+        patience=args.patience,
         mode="min",
+        check_on_train_epoch_end=(val_split == 0.0),
     )
     trainer_kwargs = {
         "max_epochs": args.max_epochs,
         "accelerator": args.accelerator,
         "devices": args.devices,
         "enable_model_summary": False,
+        "enable_checkpointing": False,
+        "logger": False,
         "log_every_n_steps": 50,
         "callbacks": [early_stop],
     }
@@ -405,6 +509,8 @@ def main() -> None:
         "boundary_mode": "random",
     }
     solver_kwargs = {"use_lt": True}
+    train_fraction = max(1e-6, 1.0 - val_split) if val_split < 1.0 else 1e-6
+    val_fraction = max(0.0, val_split)
 
     trainer = TowerABasisTrainer(geometry=geometry, conductivity=sigma)
 
@@ -418,6 +524,8 @@ def main() -> None:
             discretisation_kwargs=discretisation_kwargs,
             solver_kwargs=solver_kwargs,
             trainer_kwargs=trainer_kwargs,
+            train_fraction=train_fraction,
+            val_fraction=val_fraction,
         )
         results[name] = {
             "problem": problem,
@@ -426,6 +534,20 @@ def main() -> None:
             "trainer": trainer_obj,
         }
         report_contact_conditions(problem, name)
+        flux_estimates = estimate_contact_currents(
+            problem,
+            model,
+            samples_per_contact=args.contact_samples,
+            conductivity=sigma,
+        )
+        print("  Contact current Monte Carlo estimates:")
+        for contact, (estimate, stddev) in flux_estimates.items():
+            target = float(currents.get(contact, 0.0))
+            err = estimate - target
+            print(
+                f"    {contact:8s} est={estimate:+.3e} A +/- {stddev:.1e} "
+                f"target={target:+.3e} A -> error={err:+.3e} A"
+            )
 
     if not results:
         print("No patterns were scheduled. Nothing to do.")
@@ -448,12 +570,25 @@ def main() -> None:
         if grids is None:
             grids = grid[:3]
         slice_fields[name] = grid[3]
+        describe_slice_stats(name, grid[3])
 
-    if {"left_only", "right_only", "both"}.issubset(results.keys()):
-        err = compute_superposition_error(
-            slice_fields["left_only"], slice_fields["right_only"], slice_fields["both"]
+    if {"left_only", "right_only", "both"}.issubset(slice_fields.keys()):
+        raw_err, anchored_err = compute_superposition_error(
+            slice_fields["left_only"],
+            slice_fields["right_only"],
+            slice_fields["both"],
+            anchor=not args.no_anchor,
         )
-        print(f"Superposition relative error on z={args.slice_z:+.2f} mm slice: {err:.3e}")
+        if args.no_anchor:
+            print(
+                f"Superposition relative error on z={args.slice_z:+.2f} mm slice (raw only): "
+                f"{raw_err:.3e}"
+            )
+        else:
+            print(
+                f"Superposition relative error on z={args.slice_z:+.2f} mm slice "
+                f"(raw / anchored): {raw_err:.3e} / {anchored_err:.3e}"
+            )
     else:
         print("Skipping superposition check (requires left_only, right_only, and both).")
 

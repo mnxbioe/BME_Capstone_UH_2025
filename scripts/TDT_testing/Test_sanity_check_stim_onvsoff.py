@@ -53,9 +53,9 @@ plt.close()
 
 if outpath.exists():
     size_kb = outpath.stat().st_size / 1024
-    print(f"[qa] ✅ Saved plot → {outpath}")
+    print(f"[qa] Saved plot → {outpath}")
     print(f"[qa] File size: {size_kb:.1f} KB")
     # Optional: open folder in Explorer
     os.startfile(QA_DIR)
 else:
-    print(f"[qa] ⚠️ Failed to save plot at {outpath}")
+    print(f"[qa] Failed to save plot at {outpath}")
