@@ -43,6 +43,9 @@ env/
 *.onnx
 *.pdf
 
+# --- Run outputs (untracked experiment artifacts) ---
+runs/
+
 # --- OS metadata ---
 .DS_Store
 Thumbs.db

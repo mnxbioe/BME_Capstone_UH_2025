@@ -237,6 +237,15 @@ def main(argv: Sequence[str] | None = None) -> None:
     )
 
     print("Training complete.")
+    # Save model weights and geometry
+    save_dir = Path(r"C:\Users\Melvi\02.1_Coding_projects\BME_Capstone_UH_2025\BME_Capstone_UH_2025_Github\scripts\Tower_A_TestV1")
+    save_dir.mkdir(parents=True, exist_ok=True)
+
+    torch.save(result.model.state_dict(), save_dir / "towerA_single_electrode.pt")
+    torch.save(geometry, save_dir / "geometry_obj.pt")
+
+    print(f"Saved model and geometry to {save_dir}")
+
 
     if not args.no_plots:
         _plot_slices(result.model, geometry, x0=args.x0, y0=args.y0, z0=args.z0,
@@ -250,3 +259,4 @@ def main(argv: Sequence[str] | None = None) -> None:
 
 if __name__ == '__main__':
     main()
+

@@ -1,15 +1,14 @@
 """Geometry helpers for Tower A
 
-These provide geometry descriptions that can be mapped
-onto PINA domain objects. 
+These provide geometry descriptions matching the Geometry Contract 
 
-implementation focuses on 3-D box-shaped tissue volumes
+implementation focuses on 3-D box-shaped tissue volume
 axis-aligned plane patches representing
     - electrode contacts
     - insulating shanks
     - outer boundaries.  
 
-Matches the Geometry Contract and maps to PINA's :class:`CartesianDomain` 
+Maps to PINA's :class:`CartesianDomain` 
 
 * :class:`Box3D` defines the padded tissue domain ``Omega``.
 * :class:`PlanePatch` captures an axis-aligned planar patch (disc/square) together with its outward normal.
@@ -197,8 +196,8 @@ class TowerAGeometry:
     contacts : list[PlanePatch]
         Planar patches representing stimulating/return contacts. 
          These are tagged with ``kind="contact"``.
-    shanks : list[PlanePatch], (optional)
-        Insulating shank surfaces (zero-flux).  
+    shanks : list[PlanePatch], (optional,)
+        Insulating shank surfaces (zero-flux). 
         Defaults to an empty list.
     outers : list[PlanePatch], 
         far-field boundaries (Dirichlet or zero-flux).
@@ -208,7 +207,7 @@ class TowerAGeometry:
 
     volume: Box3D
     contacts: List[PlanePatch]
-    shanks: List[PlanePatch] = field(default_factory=list)
+    shanks: List[PlanePatch] = field(default_factory=list) #Every instance gets a private list (not global)
     outers: List[PlanePatch] = field(default_factory=list)
     interior_name: str = "interior"
 
@@ -238,8 +237,23 @@ class TowerAGeometry:
             └── outers: [PlanePatch, ...]
                 └── → outer:top, outer:bottom, ..."""
 
-    # loop through different groups of surfaces (contacts, shanks, outers) 
-    # without having to know how they’re stored internally.:
+# -------------------------------------------------------------------------
+# Surface Iterators — Tower A Geometry
+#
+# methods to provide a consistent way to loop over all defined boundary surfaces 
+# without knowing how they are stored internally.
+#
+# Purpose:
+#   • During problem setup (before training), these iterators are called to
+#     register boundary-condition domains and sample collocation points.
+#   • During training, the same iterators are reused each epoch to compute
+#     individual boundary losses (Neumann/Dirichlet) for every patch.
+#   • After training, they enable diagnostics such as per-contact flux
+#     checks or visualization, all using a unified interface.
+#
+# No looping occurs until the iterator is consumed by a for-loop or list().
+# -------------------------------------------------------------------------
+
     def iter_contacts(self) -> Iterable[PlanePatch]:
         """Iterate over electrode contact surfaces."""
         return iter(self.contacts)
@@ -266,7 +280,23 @@ class TowerAGeometry:
         names.extend(p.domain_name("outer") for p in self.outers)
         return names
 
+# -------------------------------------------------------------------------
+# Boundary Patch Builders — Tower A Geometry
+#
+# These generate the planar boundary surfaces that define the outer walls and ground
+# simulation domain. They ensure every boundary of the cubic Box3D volume has an explicit patch object
+# that can be assigned a boundary condition (BC) in the PINN loss.
+#
 
+#
+#    These patches together form the closed outer surface Γ_outer of Ω.
+#
+
+# -------------------------------------------------------------------------
+# 1. outer_faces_from_box(box, pad_kind="outer")
+#    ------------------------------------------------
+#    Creates six PlanePatch instances corresponding to the faces of the
+#    simulation cube:
 def outer_faces_from_box(box: Box3D, pad_kind="outer"):
     x0, x1 = box.x; y0, y1 = box.y; z0, z1 = box.z
     return [
@@ -277,12 +307,30 @@ def outer_faces_from_box(box: Box3D, pad_kind="outer"):
         PlanePatch(name="z_lo", axis="z", value=z0, span={"x": (x0,x1), "y": (y0,y1)}, normal_sign=-1, kind=pad_kind),
         PlanePatch(name="z_hi", axis="z", value=z1, span={"x": (x0,x1), "y": (y0,y1)}, normal_sign=+1, kind=pad_kind),
     ]
+# 2. make_gauge_patch(box, r0=1.5, phi=0.0)
+#    ------------------------------------------------
 def make_gauge_patch(box: Box3D, r0: float = 1.5, phi: float = 0.0) -> PlanePatch:
-    """Return the Dirichlet reference patch Γ₀ on the +Z face."""
+    """Creates a small square patch on the +Z face of the cube that acts as
+    the Dirichlet reference (ground) boundary Γ₀:
+       ϕ(x, y, z = z_hi) = phi
+
+    By default it approximates a 1.5 mm radius circular region centered
+    on the z = +Z plane, used to fix potential reference (0 V).  The patch
+    is tagged with metadata:
+        metadata = {"bc_type": "dirichlet", "phi_V": phi}
+
+    Usage:
+    box = Box3D(x=(-4,4), y=(-4,4), z=(-4,4))
+    outers = outer_faces_from_box(box)
+    gauge  = make_gauge_patch(box)
+
+    These are later stored inside TowerAGeometry.  During PINN setup,
+    TowerALaplaceProblem loops over these PlanePatch objects to register
+    boundary-condition domains and compute BC loss terms for each face."""
     return PlanePatch(
         name="Γ0",
-        axis="z",
-        value=box.z[1],
+        axis="z",#perpendicular to the Z axis.
+        value=box.z[1], #second element in z (the to of the cube)
         span={"x": (-r0, r0), "y": (-r0, r0)},  # square approx of 1.5 mm radius
         normal_sign=+1,
         kind="outer",
