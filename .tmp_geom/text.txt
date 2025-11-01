@@ -1,0 +1,677 @@
+Geometry 
+Contract: 
+Tower A 
+Version:
+ 1.0 
+Applies to:
+ All Tower A electric
+field simulations for thalamic microstimulation
+Table of Contents
+1. Purpose and Scope
+1
+1.1 Purpose
+1
+1.2 Scope.
+1
+2. Coordinate System & Units
+1
+2.1 Right
+handed RAS frame.
+1
+2.2 Origin.
+2
+2.3 Units.
+2
+3. Governing Model
+2
+3.1 PDE (quasi
+static conduction):
+2
+3.2 Current density and sign.
+2
+4. Domain Definition (Ω)
+3
+4.1 Shape.
+3
+4.2 Numerical extents (default).
+3
+4.3 Embedded conductors.
+3
+5. Material Properties (σ)
+3
+5.1 Base assumption (L0 and L1
+HOM).
+3
+5.2 Heterogeneous/anisotropic option (L1
+HET).
+3
+5.3 Units and scaling.
+4
+6. Contact Patch Specifications (Γₑ)
+4
+6.1 Simple (L0) — Single contact
+4
+6.2 Scalable (L1) — M×N grid (default 2x8 = 16)
+4
+7. Reference / Gauge Patch (Γ₀)
+5
+7.2 Definition (default).
+5
+7.3 Alternative.
+5
+8. Current Balance Rule
+6
+8.1 Global balance :
+6
+8.2 Monopolar configuration
+6
+8.3 Bipolar configuration.
+6
+9. Outer Boundaries (Γ_out)
+6
+9.1 Faces and normals.
+6
+9.2 Default treatment.
+6
+9.3 Optional symmetry faces.
+7
+10. Sampling Strategy (for PINN collocation)
+7
+10.1 Interior (Ω) points.
+7
+10.2 Contact patches (per Γₑ).
+7
+10.3 Outer boundaries (excluding Γ₀).
+7
+10.4 Gauge patch Γ₀.
+7
+10.5 Multi
+fidelity (optional
+7
+11. Default Numeric Values (summary)
+7
+12. Implementation Mapping (informative, non
+binding)
+8
+12.1 Domain.
+8
+12.2 Boundary conditions.
+8
+12.3 Units.
+8
+13. Sanity / Validation Checklist (execute before each run)
+8
+14. JSON Schema example
+9
+15. Notes on Scaling Up with Minimal Change
+11
+16. Change Control (initial baseline)
+12
+Appendix A — Quick Reference of Symbols
+12
+Appendix B — Rationale for Defaults (informative)
+12
+1. Purpose 
+This document fixes the
+spatial, physical, and boundary 
+agreements
+ for Tower A. It is the 
+reference point
+ for how the geometry, coordinates, materials, and boundaries are represented when solving the volume
+conduction problem for microstimulation.
+2. Coordinate System & Units
+2.1 Right
+handed RAS frame.
+x
+: Left → Right (positive to patient’s right).
+y
+: Posterior → Anterior (positive anterior).
+z
+: Inferior → Superior (positive superior).
+2.2 Origin.
+T
+he origin (0, 0, 0) is at the center of the active array footprint projected onto the electrode–tissue interface plane (the “array plane”). For single
+contact L0, the origin is the center of the single contact.
+2.3 Units.
+Length:
+millimeter (mm) 
+for all coordinates in inputs/outputs and for patch dimensions.
+Potential:
+ volt (V).
+Current:
+ampere (A).
+Conductivity:
+ siemens per meter (S/m).
+Internal scaling:
+ when evaluating PDE operators, convert 
+mm→m
+ using 
+κ = 1e−3 m/mm
+. Areas computed from mm must be multiplied by κ².
+ (because of S/m) 
+3. Governing Model
+3.1 PDE (quasi
+static conduction):
+the electric potential (V),
+the tissue conductivity (S/m).
+3.2 Current density and sign.
+Define current density 
+(A/m²). 
+Let 
+be the outward unit normal to Ω at a boundary. The Neumann is expressed as
+Convention: 
+means net current enters the tissue through that boundary patch (inward flux).
+4. Domain Definition (Ω)
+4.1 Shape.
+Rectangular box (axis
+aligned
+).
+4.2 Numerical extents (default).
+Length is given by: 
+. 
+Then
+ domain: 
+Rationale:
+K
+eep outer boundaries far
+ enough
+ to limit truncation artifacts in monopolar mode (see §8 and §11).
+ Adjust if needed.
+4.3 Embedded conductors.
+Ω contains only biological tissue. Electrodes are excluded volumes (solid conductors) whose tissue
+facing caps are boundary patches Γₑ (see §6). The default shank model is a cylinder of radius 
+with its tip flush with the array plane.
+5. Material Properties (σ)
+5.1 Base assumption (L0 and L1
+HOM).
+Homogeneous isotropic conductivity
+5.2 Heterogeneous/anisotropic option (L1
+HET).
+Replace 
+by a piecewise constant 
+or
+ symmetric positive
+definite tensor field 
+. 
+σ
+=
+σ(x
+)
+Each subdomain must 
+declare:
+ name, 
+(scalar or 3×3 SPD), and region bounds. If
+anisotropy is used, specify the principal axes relative to the RAS frame.
+5.3 Units and scaling.
+ All σ values are in S/m and used directly in PDE evaluation (
+recall 
+mm→m
+ scaling in differential operators per §2.3).
+6. Contact Patch
+(Γₑ)
+Each electrode contact 
+declares the following fields:
+Name: E<row><col> 
+Patch type: planar circular cap (default) or hemispherical cap.
+Plane & normal: array plane is z = zₐ with normal +z pointing into tissue.
+Center (mm): 
+in the global frame; for planar tips, 
+.
+Radius (mm): 
+(default 0.025 mm = 25 
+μm
+).
+Area (mm²): 
+.
+Boundary type:
+Neumann (current
+controlled): impose 
+[A/m²] on Γₑ.
+Dirichlet (voltage
+controlled): impose 
+on Γₑ.
+Current direction convention: 
+injects charge into Ω.
+Electrode body: excluded cylinder of radius 
+(default 0.05 mm), axis along +z, whose tip cap is Γₑ.
+Electrode–tissue interface assumed perfectly conducting 
+6.1 Simple (
+L0) —
+ Single contact
+Array plane: 
+.
+Contact: E01 at 
+, 
+ mm, Neumann by default.
+Mode: Monopolar (uses Γ₀ as remote return; §7).
+6.2 Scalable (L1) — M×N grid (default 
+2x8
+ = 16)
+Coordinate derivation for 2 × 8 grid
+, 
+l
+et
+:
+M = 2 (rows along 
+y
+),
+N = 8 (columns along 
+x
+),
+pitch p = 0.40 mm,
+zₐ = 0,
+rₑ = 0.025 mm.
+Then contact centers are:
+F
+or
+.
+Modes:
+Monopolar
+ (some subset active; remote return via Γ₀) or 
+Bipolar
+ (paired Neumann contacts with equal/opposite currents; §8).
+7. Reference / Gauge Patch (Γ₀)
+Because the electric potential ϕ is only defined up to an arbitrary constant, we must fix its reference somewhere.
+ W
+e do this by assigning a small surface
+called Γ₀ (Gamma-zero)
+, 
+where the potential is set to ϕ = 0.
+This reference makes the solution unique.
+In monopolar stimulation mode, Γ₀ also acts as the remote return electrode: it collects the same amount of current that the active contact injects, closing the electrical circuit through the surrounding tissue.
+7.2 Definition (default).
+Circular disc on the +z outer face at 
+with radius 
+ mm.
+Boundary condition: 
+on Γ₀ (Dirichlet).
+Remaining area of that face: treated per §9 (
+insulating
+ unless otherwise declared).
+7.3 Alternative.
+For all
+bipolar operation, Γ₀ can be shrunk to a point (gauge) with no physical role; use a tiny (≤0.1 mm) patch with 
+solely for gauge fixing.
+8. Current Balance
+8.1 
+Closed system
+ balance:
+8.2 Monopolar configuration
+.
+Γ₀ is Dirichlet; flux through Γ₀ adjusts implicitly to satisfy balance. All remaining outer faces are insulating (no net flux). Do not set all boundaries to Neumann if any 
+; that is ill
+posed.
+8.3 Bipolar configuration.
+For any active pair (e⁺, e⁻), enforce
+Γ₀ is retained for gauge but may carry negligible flux.
+9. Outer Boundaries
+(Γ_out)
+9.1 Faces and normals.
+O
+uter walls need to be far enough away from the active contacts to:
+Let the field decay naturally
+Avoid clipping important gradients
+they don’t physically reflect the brain boundary
+The 
+rectangular box domain
+Enclosed by
+ six outer faces (Γ_out) located at
+Each of those planes 
+spans the entire side
+ of the box.
+Outward normals follow the RAS axes.
+Face
+Equation
+Outward normal ({n} )
+Meaning
++X
+(x = +L_x/2)
+(+ {x}})
+right face
+−X
+(x = -L_x/2)
+(− {x}})
+left face
++Y
+(y = +L_y/2)
+(+ {y}})
+anterior face
+−Y
+(y = -L_y/2)
+(− 
+{
+y}})
+posterior face
++Z
+(z = +L_z/2)
+(+ {z}})
+superior (top) face
+−Z
+(z = -L_z/2)
+(− {z}})
+inferior (bottom) face
+ Each face is part of Γ_out, unless overridden by:
+the Dirichlet disc Γ₀ on the +Z face,
+or electrode patches Γₑ inside the box (on z = 0).
+Everywhere else:
+9.2 Default treatment.
+Γ₀ portion of 
+: Dirichlet 
+(remote return).
+All remaining outer faces (including the rest of 
+and the entire 
+, ±x, ±y): Insulating (homogeneous Neumann)
+9.3 Optional 
+symmetry
+ faces.
+When activating symmetry, declare the plane and ensure the contact set respects that symmetry; then use homogeneous Neumann on the symmetry face(s).
+10. Sampling Strategy (for PINN collocation)
+(Optional defaults for stable training; scale with problem size.)
+10.1 Interior (Ω) points.
+Base count:
+ 
+, scalable to ≥200,000 for L1 or heterogeneous conductivity models.
+ Strategy:
+ 
+Points drawn using a multi-shell, log-radial sampling scheme centered on each electrode tip.
+Shell layout:
+ 
+Radial distances: log-spaced from 10–20 
+μm
+ to 1–2 mm
+ 
+Points per shell: uniformly distributed over each spherical shell
+ Supplemental background:
+ 
+A light uniform or Latin hypercube background (e.g., ~5–10k points) ensures global coverage beyond local fields.
+10.2 Contact patches (per Γₑ).
+. Uniform on the disc, with anti
+alias jitter.
+10.3 Outer boundaries (excluding Γ₀).
+across all insulating faces, distributed proportional to face area.
+10.4 Gauge patch Γ₀.
+(Dirichlet points).
+10.5 Multi
+fidelity (optional
+)
+Bias additional Ω points to high
+gradient regions using residual
+based re
+sampling between epochs.
+11. Default Numeric Values (summary)
+ mm; array plane 
+.
+ mm (L1 pitch), 
+ mm, 
+ mm.
+Γ₀: disc at 
+, 
+ mm, 
+.
+ S/m (L0/L1
+HOM).
+Positive 
+injects
+ current into tissue.
+12. Implementation Mapping 
+12.1 Domain.
+ Represent Ω as a Cartesian box. Exclude electrode cylinders; their tip caps define Γₑ interior boundaries.
+12.2 Boundary conditions.
+Neumann (current):
+ Evaluate residuals with imposed 
+on Γₑ.
+Dirichlet (potential):
+ Fixed value residuals on Γ₀.
+Insulating:
+ homogeneous Neumann on remaining Γ_out faces.
+12.3 Units.
+Keep all geometry in mm at the 
+interface but
+ convert to SI for PDE operators (κ scaling per §2.3).
+13. Sanity / Validation Checklist (execute before each run)
+Coordinates & orientation
+Axes follow RAS; outward normals point to +x, −x, +y, −y, +z, −z appropriately.
+Array plane is at 
+; contact centers sit on that plane.
+Patch inclusion & spacing
+All Γₑ are 
+inside
+ Ω (disjoint from Γ_out) with 
+.
+Minimum padding from any contact edge to the nearest outer face is 
+≥ 10 × 
+r_e
+ and 
+≥ 5 × p
+ (or 
+≥ 2.0 mm
+, whichever larger) to limit boundary influence.
+Units & scaling
+Radii
+/lengths in mm; S/m for σ; A for currents.
+mm→m
+ conversion applied inside differential operators.
+Flux & current balance
+For monopolar: with 
+, measured net flux through Γ₀ equals 
+within tolerance.
+For bipolar: pairwise 
+.
+No non
+zero Neumann patches exist without either (
+i
+) a Dirichlet segment or (ii) paired opposite
+sign Neumann(s).
+Boundary BCs
+Γ₀ present and 
+applied.
+All non
+Γ₀ outer faces have 
+unless explicitly declared symmetry/return.
+Contact definitions
+Each Γₑ declares (name, center, radius, area, BC type, current sign).
+Neumann 
+integrates to requested 
+using 
+SI area
+ (m²).
+Material
+σ is positive (scalar) or SPD (tensor); piecewise regions do not overlap.
+If anisotropy is used, principal axes specified in the RAS frame.
+Reproducibility
+Seed, sampling counts, and geometry JSON (see §14) 
+are
+ logged with the model checkpoint.
+14. JSON Schema 
+example
+A minimal machine
+readable schema to describe 
+both L0 and L1
+ (excerpt):
+{
+  "frame": "RAS",
+  "units
+": {
+"length": "mm", "sigma": "S/m", "potential": "
+V"}
+,
+  "domain
+": {
+    "type": "box",
+    "
+extents
+_mm
+": {
+"Lx": 12.0, "Ly": 12.0, "
+Lz
+": 
+12.0},
+    "
+array
+_plane_mm
+": {
+"z": 0.0}
+  },
+  "materials": [
+    {"name": "tissue", "type": "isotropic", "
+sigma_S_per_m
+": 0.20, "region": "
+all"}
+  ],
+  "electrodes
+": {
+    "
+shank
+_radius_mm
+": 0.05,
+    "patches": [
+      {
+        "name": "E01",
+        "
+center
+_mm
+": [0.0, 0.0, 0.0],
+        "
+radius
+_mm
+": 0.025,
+        "
+bc
+": {
+"type": "
+neumann
+", "jn_A_per_m2": null
+},  /
+/ fill at runtime
+        "mode": "monopolar"
+      }
+      // L1: add E
+02..
+EMN using pitch and indexing
+    ],
+    "grid
+": {
+"M": 4, "N": 4, "
+pitch_mm
+": 0.40, "
+auto_populate
+": true}
+  },
+  "boundaries
+": {
+    "
+gauge
+_patch
+": {
+      "face": "+z",
+      "
+center
+_mm
+": [0.0, 0.0, 6.0],
+      "
+radius
+_mm
+": 1.5,
+      "
+bc
+": {
+"type": "
+dirichlet
+", "
+phi_V
+": 0.0}
+    },
+    "
+outer
+_faces
+": {
+      "x+": "neumann0",
+      "x-": "neumann0",
+      "y+": "neumann0",
+      "y-": "neumann0",
+      "z+": "neumann0_except_gauge",
+      "z-": "neumann0"
+    }
+  },
+  "
+current
+_balance
+": {
+"
+enforce_pairwise
+": false, "
+tolerance_A
+": 1e-
+9},
+  "sampling
+": {
+    "
+N_omega
+": 50000,
+    "
+N_patch_each
+": 2000,
+    "
+N_outer
+": 10000,
+    "
+N_gauge
+": 5000
+  }
+}
+15. Notes on Scaling Up with Minimal Change
+L0→L1: Keep Ω, Γ₀, σ unchanged; only add patches via 
+grid.auto
+_populate
+.
+Modes: Switch between monopolar (set jn_A_per_m2 on selected Γₑ; leave others 0) and bipolar (set equal/opposite 
+jn
+ on paired Γₑ; keep Γ₀ as gauge).
+Heterogeneity: Introduce subregions in §5 without touching patches or boundaries.
+Validation: Same checklist applies; only the counts in §10 scale.
+16. Change Control 
+v1.0
+— Establishes
+ box Ω (12 mm), RAS axes, Γ₀ Dirichlet disc at +z face, current sign convention, and L0/L1 compatibility.
+V2
+.0
+Appendix A — Quick Reference of Symbols
+: tissue domain (mm); 
+: its boundary.
+: electrode patch 
+.
+: outer faces; 
+: gauge/return patch.
+: electric potential (V).
+: conductivity (S/m).
+: current density (A/m²).
+: normal current density (A/m²), 
+positive inward
+.
+: electrode current (A).
+Appendix B — Rationale for Defaults (informative)
+Dirichlet Γ₀
+ avoids ill
+posed pure
+Neumann problems when injecting current.
+12 mm box & 1.5 mm Γ₀
+: empirically reduce boundary influence while keeping training affordable; increase if higher injected currents or highly conductive CSF layers are modeled.
+25 
+μm
+ contact radius
+ and 
+0.40 mm pitch
+: representative micro
+scale parameters; adjust per hardware while preserving conventions.
+Visuals:
+Zoomed 
+in :
+3D view
+https://www.ebrains.eu/tools/rat-brain
+https://www.nitrc.org/projects/tpm_rat/
+Length 
+2.6  (
+mm)
+H 2 (mm) 
+W 2 mm 
+

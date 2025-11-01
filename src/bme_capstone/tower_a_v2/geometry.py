@@ -7,7 +7,7 @@ and areas so boundary flux calculations remain explicit and reviewable.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, List, Mapping, MutableMapping, Optional, Tuple
+from typing import Dict, Iterable, List, Mapping, MutableMapping, Optional, Sequence, Tuple
 
 from pina.domain import CartesianDomain
 
@@ -171,61 +171,224 @@ def outer_faces_from_box(box: Box3D, *, kind: str = "outer") -> List[PlanePatch]
     ]
 
 
-def make_gauge_patch(box: Box3D, *, size: float = 3.0, phi: float = 0.0) -> PlanePatch:
+def make_gauge_patch(
+    box: Box3D,
+    *,
+    size: float = 3.0,
+    phi: float = 0.0,
+    center: Tuple[float, float] | None = None,
+) -> PlanePatch:
     half = float(size) * 0.5
+    if center is None:
+        cx, cy = 0.0, 0.0
+    else:
+        cx, cy = center
     return PlanePatch(
         name="gauge",
         axis="z",
         value=box.z[1],
-        span={"x": (-half, half), "y": (-half, half)},
+        span={"x": (cx - half, cx + half), "y": (cy - half, cy + half)},
         normal_sign=+1,
         kind="gauge",
         metadata={"bc_type": "dirichlet", "phi_V": float(phi)},
     )
 
 
-def single_contact_reference(contact_name: str = "E0") -> TowerAGeometry:
-    """Simple single-contact geometry for debugging and smoke tests."""
+def _rectangles_around_square(
+    x_bounds: Tuple[float, float],
+    y_bounds: Tuple[float, float],
+    square_x: Tuple[float, float],
+    square_y: Tuple[float, float],
+    *,
+    axis: Axis,
+    value: float,
+    name_prefix: str,
+    normal_sign: int,
+    kind: str,
+) -> List[PlanePatch]:
+    x0, x1 = x_bounds
+    y0, y1 = y_bounds
+    sq_x0, sq_x1 = square_x
+    sq_y0, sq_y1 = square_y
 
-    box = Box3D(x=(-6.0, 6.0), y=(-6.0, 6.0), z=(-6.0, 6.0))
-    z_hi = box.z[1]
+    patches: List[PlanePatch] = []
+
+    def _add(name: str, x_lo: float, x_hi: float, y_lo: float, y_hi: float) -> None:
+        if x_hi <= x_lo or y_hi <= y_lo:
+            return
+        patches.append(
+            PlanePatch(
+                name,
+                axis,
+                value,
+                {"x": (x_lo, x_hi), "y": (y_lo, y_hi)},
+                normal_sign=normal_sign,
+                kind=kind,
+            )
+        )
+
+    _add(f"{name_prefix}_left", x0, sq_x0, y0, y1)
+    _add(f"{name_prefix}_right", sq_x1, x1, y0, y1)
+    _add(f"{name_prefix}_bottom", sq_x0, sq_x1, y0, sq_y0)
+    _add(f"{name_prefix}_top", sq_x0, sq_x1, sq_y1, y1)
+    return patches
+
+
+def single_contact_geometry(
+    *,
+    domain_xy_mm: float = 12.0,
+    domain_depth_mm: float = 12.0,
+    array_plane_z: float = 0.0,
+    contact_radius_mm: float = 0.025,
+    gauge_radius_mm: float = 1.5,
+) -> TowerAGeometry:
+    """Tower A contract L0 single-contact geometry."""
+
+    half_xy = domain_xy_mm * 0.5
+    z_lo = array_plane_z
+    z_hi = array_plane_z + domain_depth_mm
+    box = Box3D(x=(-half_xy, half_xy), y=(-half_xy, half_xy), z=(z_lo, z_hi))
+
+    half_contact = float(contact_radius_mm)
     contact = PlanePatch(
-        name=contact_name,
+        name="E01",
         axis="z",
-        value=z_hi,
-        span={"x": (-1.0, 1.0), "y": (-1.0, 1.0)},
-        normal_sign=+1,
+        value=array_plane_z,
+        span={"x": (-half_contact, half_contact), "y": (-half_contact, half_contact)},
+        normal_sign=-1,
         kind="contact",
+        metadata={"radius_mm": contact_radius_mm},
     )
-    outers = [p for p in outer_faces_from_box(box) if p.name != "z_hi"]
-    gauge_patch = make_gauge_patch(box, size=2.0, phi=0.0)
-    return TowerAGeometry(volume=box, contacts=[contact], shanks=[], outers=outers, gauge=gauge_patch)
+
+    # Insulating resin/shank covering the remainder of the array plane
+    shank_patches = _rectangles_around_square(
+        box.x,
+        box.y,
+        contact.span["x"],
+        contact.span["y"],
+        axis="z",
+        value=array_plane_z,
+        name_prefix="shank_z_lo",
+        normal_sign=-1,
+        kind="shank",
+    )
+
+    gauge_patch = make_gauge_patch(box, size=gauge_radius_mm * 2.0, phi=0.0, center=(0.0, 0.0))
+
+    outers: List[PlanePatch] = []
+    for patch in outer_faces_from_box(box):
+        if patch.name == "z_lo":
+            continue  # handled by contact + shank patches
+        if patch.name == "z_hi":
+            outers.extend(
+                _rectangles_around_square(
+                    box.x,
+                    box.y,
+                    gauge_patch.span["x"],
+                    gauge_patch.span["y"],
+                    axis="z",
+                    value=z_hi,
+                    name_prefix="z_hi_outer",
+                    normal_sign=+1,
+                    kind="outer",
+                )
+            )
+        else:
+            outers.append(patch)
+
+    return TowerAGeometry(volume=box, contacts=[contact], shanks=shank_patches, outers=outers, gauge=gauge_patch)
 
 
-def example_two_contacts() -> TowerAGeometry:
-    """Small two-contact example for smoke tests and documentation."""
+def grid_contact_geometry(
+    rows: int = 2,
+    cols: int = 8,
+    *,
+    domain_xy_mm: float = 12.0,
+    domain_depth_mm: float = 12.0,
+    array_plane_z: float = 0.0,
+    pitch_mm: float = 0.40,
+    contact_radius_mm: float = 0.025,
+    gauge_radius_mm: float = 1.5,
+    active_contacts: Optional[Sequence[str]] = None,
+) -> TowerAGeometry:
+    """Tower A contract L1 grid (MxN) geometry."""
 
-    box = Box3D(x=(-6.0, 6.0), y=(-6.0, 6.0), z=(-6.0, 6.0))
-    z_hi = box.z[1]
-    left = PlanePatch(
-        name="E_left",
+    half_xy = domain_xy_mm * 0.5
+    z_lo = array_plane_z
+    z_hi = array_plane_z + domain_depth_mm
+    box = Box3D(x=(-half_xy, half_xy), y=(-half_xy, half_xy), z=(z_lo, z_hi))
+
+    def contact_name(r: int, c: int) -> str:
+        return f"E{r:02d}{c:02d}"
+
+    half_pitch_x = (cols - 1) * 0.5 * pitch_mm
+    half_pitch_y = (rows - 1) * 0.5 * pitch_mm
+    half_contact = float(contact_radius_mm)
+
+    contacts: List[PlanePatch] = []
+    for r in range(rows):
+        y = (half_pitch_y - r * pitch_mm)
+        for c in range(cols):
+            x = (-half_pitch_x + c * pitch_mm)
+            name = contact_name(r + 1, c + 1)
+            if active_contacts and name not in active_contacts:
+                continue
+            contacts.append(
+                PlanePatch(
+                    name,
+                    axis="z",
+                    value=array_plane_z,
+                    span={"x": (x - half_contact, x + half_contact), "y": (y - half_contact, y + half_contact)},
+                    normal_sign=-1,
+                    kind="contact",
+                    metadata={"radius_mm": contact_radius_mm, "pitch_mm": pitch_mm},
+                )
+            )
+
+    if not contacts:
+        raise ValueError("No contacts selected; check active_contacts parameter.")
+
+    # Compute shank patches by subtracting the bounding rectangle of all contacts
+    min_x = min(p.span["x"][0] for p in contacts)
+    max_x = max(p.span["x"][1] for p in contacts)
+    min_y = min(p.span["y"][0] for p in contacts)
+    max_y = max(p.span["y"][1] for p in contacts)
+    shank_patches = _rectangles_around_square(
+        box.x,
+        box.y,
+        (min_x, max_x),
+        (min_y, max_y),
         axis="z",
-        value=z_hi,
-        span={"x": (-5.0, -3.0), "y": (-1.0, 1.0)},
-        normal_sign=+1,
-        kind="contact",
+        value=array_plane_z,
+        name_prefix="shank_z_lo",
+        normal_sign=-1,
+        kind="shank",
     )
-    right = PlanePatch(
-        name="E_right",
-        axis="z",
-        value=z_hi,
-        span={"x": (3.0, 5.0), "y": (-1.0, 1.0)},
-        normal_sign=+1,
-        kind="contact",
-    )
-    outers = [p for p in outer_faces_from_box(box) if p.name != "z_hi"]
-    gauge_patch = make_gauge_patch(box, size=2.0, phi=0.0)
-    return TowerAGeometry(volume=box, contacts=[left, right], shanks=[], outers=outers, gauge=gauge_patch)
+
+    gauge_patch = make_gauge_patch(box, size=gauge_radius_mm * 2.0, phi=0.0, center=(0.0, 0.0))
+
+    outers: List[PlanePatch] = []
+    for patch in outer_faces_from_box(box):
+        if patch.name == "z_lo":
+            continue
+        if patch.name == "z_hi":
+            outers.extend(
+                _rectangles_around_square(
+                    box.x,
+                    box.y,
+                    gauge_patch.span["x"],
+                    gauge_patch.span["y"],
+                    axis="z",
+                    value=z_hi,
+                    name_prefix="z_hi_outer",
+                    normal_sign=+1,
+                    kind="outer",
+                )
+            )
+        else:
+            outers.append(patch)
+
+    return TowerAGeometry(volume=box, contacts=contacts, shanks=shank_patches, outers=outers, gauge=gauge_patch)
 
 
 __all__ = [
@@ -235,6 +398,6 @@ __all__ = [
     "TowerAGeometry",
     "outer_faces_from_box",
     "make_gauge_patch",
-    "single_contact_reference",
-    "example_two_contacts",
+    "single_contact_geometry",
+    "grid_contact_geometry",
 ]

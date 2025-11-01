@@ -51,7 +51,7 @@ if torch.cuda.is_available():
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Train one Tower A v2 basis field")
-    p.add_argument("contact", type=str, nargs="?", default="E0", help="Contact name to drive as basis")
+    p.add_argument("contact", type=str, nargs="?", default="E01", help="Contact name to drive as basis")
     p.add_argument("--current", type=float, default=1e-6, help="Basis current (A)")
     p.add_argument("--seed", type=int, default=1234, help="Deterministic seed")
     p.add_argument(
@@ -61,7 +61,7 @@ def parse_args() -> argparse.Namespace:
         choices=["smoke", "default", "thorough"],
         help="Training preset",
     )
-    p.add_argument("--geometry", type=str, default="single_contact_reference", help="Geometry builder in tower_a_v2.geometry")
+    p.add_argument("--geometry", type=str, default="single_contact_geometry", help="Geometry builder in tower_a_v2.geometry")
     p.add_argument("--plot", action="store_true", help="Plot E-field slices and collocation samples after training")
     p.add_argument("--plot-backend", type=str, default=None, help="Matplotlib backend (e.g., 'Agg', 'TkAgg')")
     p.add_argument("--plot-limits", type=float, nargs=2, default=(-2.0, 2.0), help="Field slice limits [min max] in mm")
@@ -165,13 +165,21 @@ def main() -> None:
     torch.save(result.model.state_dict(), ckpt_dir / f"model_{args.contact}.pt")
 
     if args.plot:
+        # Center slices around the active contact to make visuals clearer
+        contact_patch = next(p for p in geometry.contacts if p.name == args.contact)
+        cx = sum(contact_patch.span["x"]) * 0.5
+        cy = sum(contact_patch.span["y"]) * 0.5
+        # Slice slightly inside the domain beneath the contact face
+        eps = 0.1
+        z_slice = max(geometry.volume.z[0] + eps, min(contact_patch.value - eps, geometry.volume.z[1] - eps))
+
         limits = tuple(sorted(args.plot_limits))
         plot_field_slices(
             result.solver,
             geometry,
-            x0=0.0,
-            y0=0.0,
-            z0=0.0,
+            x0=cx,
+            y0=cy,
+            z0=z_slice,
             limits=limits,
             grid_n=args.plot_grid_n,
             backend=args.plot_backend,

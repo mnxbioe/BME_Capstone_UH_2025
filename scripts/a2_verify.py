@@ -42,9 +42,9 @@ if torch.cuda.is_available():
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Tower A v2 physics verification")
-    p.add_argument("--contact", type=str, default="E0", help="Contact name to verify")
+    p.add_argument("--contact", type=str, default="E01", help="Contact name to verify")
     p.add_argument("--current", type=float, default=1e-6, help="Basis current used during training (A)")
-    p.add_argument("--geometry", type=str, default="single_contact_reference", help="Geometry builder in tower_a_v2.geometry")
+    p.add_argument("--geometry", type=str, default="single_contact_geometry", help="Geometry builder in tower_a_v2.geometry")
     p.add_argument("--preset", type=str, default="smoke", choices=["smoke", "default"], help="Preset")
     p.add_argument("--seed", type=int, default=1234)
     p.add_argument("--accelerator", type=str, default="auto", help="Lightning accelerator (cpu, gpu, auto)")
