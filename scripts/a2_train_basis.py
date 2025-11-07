@@ -15,6 +15,11 @@ from pathlib import Path
 
 import numpy as np
 import torch
+from pina import LabelTensor
+import pyvista as pv
+import torch._dynamo
+torch._dynamo.config.suppress_errors = True
+torch._dynamo.config.disable = True
 
 # Disable torch.compile/Triton requirement (fallback to eager)
 os.environ.setdefault("TORCH_COMPILE_DISABLE", "1")
@@ -170,27 +175,84 @@ def main() -> None:
         cx = sum(contact_patch.span["x"]) * 0.5
         cy = sum(contact_patch.span["y"]) * 0.5
         # Slice slightly inside the domain beneath the contact face
-        eps = 0.1
-        z_slice = max(geometry.volume.z[0] + eps, min(contact_patch.value - eps, geometry.volume.z[1] - eps))
-
+        # --- Multiple depth slices ---
+        depth_increments = [0.1, 1.0, 3.0]  # mm above electrode plane
         limits = tuple(sorted(args.plot_limits))
-        plot_field_slices(
-            result.solver,
-            geometry,
-            x0=cx,
-            y0=cy,
-            z0=z_slice,
-            limits=limits,
-            grid_n=args.plot_grid_n,
-            backend=args.plot_backend,
-        )
-        plot_collocation_samples(
-            result.problem,
-            interior_points=int(discretisation.get("interior_points", 10_000)),
-            contact_points=int(discretisation.get("contact_points", 2_048)),
-            outer_points=int(discretisation.get("outer_points", 2_048)),
-            backend=args.plot_backend,
-        )
+
+        for dz in depth_increments:
+            z_slice = geometry.volume.z[0] + dz
+            print(f"Plotting field slice at z = {z_slice:.2f} mm")
+
+            plot_field_slices(
+                result.solver,
+                geometry,
+                x0=cx,
+                y0=cy,
+                z0=z_slice,
+                limits=limits,
+                grid_n=args.plot_grid_n,
+                backend=args.plot_backend,
+            )
+            # --- 3D Field Visualization (PyVista) ---
+        print("Generating 3D field visualization...")
+        from pina import LabelTensor
+        import pyvista as pv
+
+        # Helper: compute E = -∇phi
+        def compute_electric_field(model: torch.nn.Module, pts: np.ndarray) -> np.ndarray:
+            """Compute electric field from a PINA model using autograd."""
+            param = next(model.parameters())
+            device = param.device
+            dtype = param.dtype
+
+            coords_tensor = torch.tensor(pts, dtype=dtype, device=device, requires_grad=True)
+            coords = LabelTensor(coords_tensor, labels=["x", "y", "z"])
+
+            outputs = model(coords)
+            phi_tensor = (
+                outputs.extract(["phi"]).tensor.squeeze(-1)
+                if hasattr(outputs, "extract")
+                else outputs
+            )
+
+            grad = torch.autograd.grad(
+                phi_tensor,
+                coords_tensor,
+                grad_outputs=torch.ones_like(phi_tensor),
+                create_graph=False,
+                retain_graph=False,
+            )[0]
+            return (-grad).detach().cpu().numpy()
+
+        # Generate 3D grid
+        x = np.linspace(limits[0], limits[1], 41)
+        y = np.linspace(limits[0], limits[1], 41)
+        z = np.linspace(geometry.volume.z[0], geometry.volume.z[0] + 3.0, 41)
+        X, Y, Z = np.meshgrid(x, y, z, indexing="ij")
+        pts = np.stack([X.ravel(), Y.ravel(), Z.ravel()], axis=1)
+
+        # Compute electric field
+        E = compute_electric_field(result.solver, pts)
+        E_mag = np.linalg.norm(E, axis=1)
+
+                # Create PyVista volume
+        grid = pv.StructuredGrid(X, Y, Z)
+        vectors = E.reshape(-1, 3)  # ensure contiguous (n_points, 3)
+        grid["|E|"] = E_mag  # scalars must be flat and match n_points
+        grid["E"] = vectors
+
+        p = pv.Plotter()
+        p.add_volume(
+        grid, scalars="|E|", cmap="plasma",
+        opacity="linear", shade=True, clim=[0, np.max(E_mag)*0.8])
+
+        p.add_arrows(grid.points[::500], vectors[::500], mag=2.0, color="white")
+        p.add_axes()
+        p.show_grid()
+        p.show(title="3D Electric Field Magnitude")
+        p.export_html("E_field_3D.html")
+
+
 
     print(f"Run saved to: {run_dir}")
 

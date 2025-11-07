@@ -28,6 +28,6 @@ ipywidgets
 nbformat
 nbconvert
 
-
-
-
+# plots 
+pyvista
+pyvistaqt
