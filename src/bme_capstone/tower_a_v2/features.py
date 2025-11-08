@@ -1,4 +1,17 @@
-"""Evaluation and feature-extraction utilities for Tower A v2."""
+"""
+Tower A v2 — Field Evaluation and Feature Extraction Utilities
+---------------------------------------------------------------
+This module takes the trained PINN basis fields 
+and reconstructs composite electric fields for arbitrary electrode
+current patterns.
+
+- Inputs: spatial coordinates + electrode currents
+- Outputs: φ (potential), E (electric field), |E| (magnitude), and J (current density)
+
+Used in: notebooks/02_towerA_train.ipynb  → for validation and visualization
+Also feeds Tower B via precomputed feature maps.
+"""
+
 
 from __future__ import annotations
 
@@ -31,7 +44,25 @@ def generate_cartesian_grid(
     dtype: torch.dtype = torch.float32,
     device: Optional[torch.device] = None,
 ) -> Tuple[torch.Tensor, Tuple[int, int, int]]:
-    """Generate a Cartesian mesh covering ``box`` with optional padding."""
+    """
+    Create a regular 3-D grid of (x, y, z) coordinates covering the given Box3D.
+
+    Parameters
+    ----------
+    box : Box3D Defines the spatial bounds of the geometry.
+    spacing :  Distance between adjacent grid points (in mm).
+    padding : Optional extension beyond the box edges (for plotting or boundary sampling).
+
+    Returns
+    -------
+    coords : (N, 3) tensor Flattened list of grid points.
+    shape  : (nx, ny, nz)  Grid dimensions along each axis.
+
+    Notes
+    -----
+    This is mostly used for plotting or sampling of φ/E/J fields
+    after the PINN has been trained.
+    """
     if spacing <= 0:
         raise ValueError("Spacing must be positive.")
 
@@ -56,7 +87,15 @@ def generate_cartesian_grid(
 
 @dataclass
 class FieldEvaluation:
-    """container for evaluated field quantities."""
+    """
+    Container for evaluated field quantities at arbitrary coordinates.
+
+    Holds everything produced by the evaluator:
+    φ  : potential
+    E  : electric field vector
+    |E|: field magnitude
+    J  : current density
+    """
 
     coords: LabelTensor
     currents: torch.Tensor
@@ -128,6 +167,10 @@ class FieldEvaluator:
         device: torch.device,
         dtype: torch.dtype,
     ) -> torch.Tensor:
+        """
+        Ensure the current vector matches the number of electrodes
+        and broadcast to all spatial points
+        """
         tensor = torch.as_tensor(currents, dtype=dtype, device=device)
         if tensor.ndim == 1: # for 1D cases 
             if tensor.shape[0] != self.n_contacts:
