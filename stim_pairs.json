@@ -1,0 +1,125 @@
+{
+  "pairs": [
+    {
+      "type": "horizontal",
+      "left": 0,
+      "right": 1
+    },
+    {
+      "type": "horizontal",
+      "left": 1,
+      "right": 2
+    },
+    {
+      "type": "horizontal",
+      "left": 2,
+      "right": 3
+    },
+    {
+      "type": "horizontal",
+      "left": 3,
+      "right": 4
+    },
+    {
+      "type": "horizontal",
+      "left": 4,
+      "right": 5
+    },
+    {
+      "type": "horizontal",
+      "left": 5,
+      "right": 6
+    },
+    {
+      "type": "horizontal",
+      "left": 6,
+      "right": 7
+    },
+    {
+      "type": "horizontal",
+      "left": 8,
+      "right": 9
+    },
+    {
+      "type": "horizontal",
+      "left": 9,
+      "right": 10
+    },
+    {
+      "type": "horizontal",
+      "left": 10,
+      "right": 11
+    },
+    {
+      "type": "horizontal",
+      "left": 11,
+      "right": 12
+    },
+    {
+      "type": "horizontal",
+      "left": 12,
+      "right": 13
+    },
+    {
+      "type": "horizontal",
+      "left": 13,
+      "right": 14
+    },
+    {
+      "type": "horizontal",
+      "left": 14,
+      "right": 15
+    },
+    {
+      "type": "vertical",
+      "top": 0,
+      "bottom": 8
+    },
+    {
+      "type": "vertical",
+      "top": 1,
+      "bottom": 9
+    },
+    {
+      "type": "vertical",
+      "top": 2,
+      "bottom": 10
+    },
+    {
+      "type": "vertical",
+      "top": 3,
+      "bottom": 11
+    },
+    {
+      "type": "vertical",
+      "top": 4,
+      "bottom": 12
+    },
+    {
+      "type": "vertical",
+      "top": 5,
+      "bottom": 13
+    },
+    {
+      "type": "vertical",
+      "top": 6,
+      "bottom": 14
+    },
+    {
+      "type": "vertical",
+      "top": 7,
+      "bottom": 15
+    }
+  ],
+  "active_pairs_default": [
+    {
+      "left": 3,
+      "right": 4
+    },
+    {
+      "left": 11,
+      "right": 12
+    }
+  ],
+  "pattern_notes": "Default uses two horizontal adjacent pairs (one per row). Use 1\u20133 pairs total."
+}
